@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Input Transaksi JFS — J&amp;T Cargo</title>
+    <style>
+        :root {
+            --primary: #dc2626;
+            --primary-hover: #b91c1c;
+            --blue: #2563eb;
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --border: #e5e7eb;
+            --text: #111827;
+            --muted: #6b7280;
+        }
+        * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+        body { background: var(--bg); color: var(--text); margin: 0; padding: 24px; }
+        .container { max-width: 1220px; margin: 0 auto; }
+        .topbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+        .back-link { text-decoration: none; color: var(--blue); font-weight: 600; font-size: 14px; }
+        .card {
+            background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+            padding: 22px; margin-bottom: 20px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        .header-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; }
+        h2 { margin: 0 0 4px 0; font-size: 21px; }
+        .subtitle { margin: 0; color: var(--muted); font-size: 13.5px; }
+        .badge-jnt {
+            background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;
+            padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 700;
+        }
+        .form-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px;
+        }
+        .form-group { display: flex; flex-direction: column; gap: 5px; }
+        label { font-size: 12.5px; font-weight: 600; color: #374151; }
+        input[type="text"], input[type="number"], input[type="date"], select {
+            padding: 9px 11px; border: 1px solid #d1d5db; border-radius: 7px; font-size: 13.5px; background: #fff;
+        }
+        input:focus, select:focus { outline: none; border-color: var(--primary); }
+        .calc-preview {
+            background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 8px;
+            padding: 12px 16px; margin-top: 14px; display: flex; flex-wrap: wrap; gap: 20px; font-size: 13px;
+        }
+        .calc-item span { display: block; color: var(--muted); font-size: 11.5px; }
+        .calc-item strong { font-size: 15px; color: #0f172a; }
+        .btn {
+            background: var(--primary); color: #fff; border: none; border-radius: 7px;
+            padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 7px;
+        }
+        .btn:hover { background: var(--primary-hover); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-green { background: #15803d; text-decoration: none; }
+        .btn-green:hover { background: #166534; }
+        .btn-outline { background: #fff; color: var(--text); border: 1px solid #d1d5db; }
+        .btn-outline:hover { background: #f9fafb; }
+        .summary-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 12px; margin-bottom: 16px;
+        }
+        .stat-box { border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: #fafafa; }
+        .stat-label { font-size: 11.5px; color: var(--muted); }
+        .stat-val { font-size: 16px; font-weight: 700; margin-top: 3px; }
+        .table-wrap { overflow-x: auto; max-height: 500px; border: 1px solid var(--border); border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 12.8px; }
+        thead th {
+            position: sticky; top: 0; background: #0f172a; color: #fff;
+            padding: 10px 10px; text-align: left; z-index: 2;
+        }
+        tbody td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        tbody tr:nth-child(even) { background: #f8fafc; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .text-deb { color: #15803d; font-weight: 600; }
+        .text-kred { color: #dc2626; font-weight: 600; }
+        .pill-link {
+            display: inline-block; padding: 3px 8px; border-radius: 5px; font-size: 11.5px;
+            background: #eff6ff; color: #1d4ed8; text-decoration: none; font-weight: 600;
+        }
+        .toast {
+            padding: 11px 15px; border-radius: 8px; margin-top: 12px; font-size: 13.5px; display: none;
+        }
+        .toast.ok { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .toast.err { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="topbar">
+        <a href="/dashboard" class="back-link">← Kembali ke Dashboard</a>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <span id="gdriveFileLabel" style="font-size: 12.5px; color: #4b5563; font-weight: 600;"></span>
+            <a id="openGsheetsBtn" href="#" target="_blank" class="btn btn-green" style="display: none;">
+                Buka Google Sheets di Drive ↗
+            </a>
+        </div>
+    </div>
+
+    <!-- Form Input Harian JFS -->
+    <div class="card">
+        <div class="header-row">
+            <div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                    <h2>Form Transaksi Operasional JFS</h2>
+                    <span class="badge-jnt">J&amp;T CARGO — CV. JASKURINDO</span>
+                </div>
+                <p class="subtitle">Otomatis tersimpan ke Google Sheets di Google Drive sesuai tanggal yang dipilih &amp; menghitung Komisi 40% serta Saldo JFS.</p>
+            </div>
+            <div style="text-align: right;">
+                <span style="font-size: 12px; color: var(--muted);">Target Tab Bulan:</span><br>
+                <strong id="activeSheetBadge" style="font-size: 16px; color: var(--primary);">NOV</strong>
+            </div>
+        </div>
+
+        <form id="jfsForm">
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="tanggal">Tanggal Transaksi (Hari / Bulan / Tahun)</label>
+                    <input type="date" id="tanggal" name="tanggal" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="jenis_transaksi">Jenis Transaksi JFS</label>
+                    <select id="jenis_transaksi" name="jenis_transaksi">
+                        <option value="PENJUALAN">Penjualan Resi (Outgoing JFS)</option>
+                        <option value="FEE_INCOMING">Fee INCOMING (Debet JFS)</option>
+                        <option value="COD_FEE">COD Fee (Debet JFS)</option>
+                        <option value="CASHBACK">Cash back LEVEL A (Debet JFS)</option>
+                        <option value="TOP_UP">TOP UP Saldo JFS (Debet)</option>
+                        <option value="DFOD_INCOMING">DFOD INCOMING (Kredit JFS)</option>
+                        <option value="PAYMENT_COD">DEBET JFS PAYMENT COD (Kredit)</option>
+                        <option value="REFUND_DFOD">Refund DFOD (Debet JFS)</option>
+                        <option value="PENGELUARAN">Pengeluaran Operasional Outlet</option>
+                        <option value="CUSTOM">Transaksi Lain-lain</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="nama_pengirim">Nama Pengirim / Customer</label>
+                    <input type="text" id="nama_pengirim" name="nama_pengirim" placeholder="Contoh: AZEA KIDS / PT. NUSANTARA">
+                </div>
+
+                <div class="form-group">
+                    <label for="no_resi">Nomor Resi J&amp;T Cargo</label>
+                    <input type="text" id="no_resi" name="no_resi" placeholder="Contoh: 201798129565">
+                </div>
+
+                <div class="form-group" id="grpKategoriPengeluaran" style="display: none;">
+                    <label for="kategori_pengeluaran">Pos Pengeluaran</label>
+                    <select id="kategori_pengeluaran" name="kategori_pengeluaran">
+                        <option value="BENSIN,PARKIR">Bensin &amp; Parkir</option>
+                        <option value="TOKEN LISTRIK">Token Listrik</option>
+                        <option value="U.M">Uang Makan (U.M)</option>
+                        <option value="RT KANTOR">Rumah Tangga Kantor</option>
+                        <option value="ATK">ATK &amp; Lakban</option>
+                        <option value="TLP./INTERNET">Telepon / Internet</option>
+                        <option value="SVC KNDARAAN">Service Kendaraan</option>
+                        <option value="BY PENJUALAN">Biaya Penjualan</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="grpArahCustom" style="display: none;">
+                    <label for="arah_mutasi">Posisi Saldo JFS</label>
+                    <select id="arah_mutasi" name="arah_mutasi">
+                        <option value="KREDIT">Kredit (Mengurangi Saldo JFS)</option>
+                        <option value="DEBET">Debet (Menambah Saldo JFS)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="nominal_jfs" id="lblNominalJfs">Potongan Modal JFS 60% (Rp)</label>
+                    <input type="number" id="nominal_jfs" name="nominal_jfs" step="any" min="0" placeholder="0" required>
+                </div>
+
+                <div class="form-group penjualan-only">
+                    <label for="asuransi">Asuransi (Rp) — Otomatis Baris ke-2</label>
+                    <input type="number" id="asuransi" name="asuransi" step="any" min="0" value="0">
+                </div>
+
+                <div class="form-group penjualan-only">
+                    <label for="packing">Biaya Packing / Kayu (Rp)</label>
+                    <input type="number" id="packing" name="packing" step="any" min="0" value="0">
+                </div>
+
+                <div class="form-group penjualan-only">
+                    <label for="status_bayar">Status Pembayaran Customer</label>
+                    <select id="status_bayar" name="status_bayar">
+                        <option value="LUNAS">LUNAS (Masuk Kolom PAID)</option>
+                        <option value="TEMPO">BELUM LUNAS / TEMPO (Masuk BALANCE)</option>
+                    </select>
+                </div>
+
+                <div class="form-group paid-only">
+                    <label for="metode_bayar">Rekening / Metode Terima Bayar</label>
+                    <select id="metode_bayar" name="metode_bayar">
+                        <option value="BCA MULYATI">BCA MULYATI</option>
+                        <option value="BRI ARTHA">BRI ARTHA</option>
+                        <option value="KAS">KAS TUNAI</option>
+                        <option value="QRIS">QRIS</option>
+                    </select>
+                </div>
+
+                <div class="form-group paid-only">
+                    <label for="nominal_paid">Nominal Dibayar Customer (Rp)</label>
+                    <input type="number" id="nominal_paid" name="nominal_paid" step="any" min="0" placeholder="0">
+                </div>
+
+                <div class="form-group paid-only">
+                    <label for="tanggal_paid">Tanggal Customer Bayar</label>
+                    <input type="date" id="tanggal_paid" name="tanggal_paid">
+                </div>
+
+                <div class="form-group topup-only" style="display: none;">
+                    <label for="biaya_admin">Biaya Admin Top Up (Rp)</label>
+                    <input type="number" id="biaya_admin" name="biaya_admin" step="any" min="0" value="5000">
+                </div>
+
+                <div class="form-group">
+                    <label for="catatan">Catatan Tambahan (Diskon / Keterangan)</label>
+                    <input type="text" id="catatan" name="catatan" placeholder="Contoh: Diskon 15% / TF BRI">
+                </div>
+
+                <div class="form-group">
+                    <label for="bukti_transaksi">Bukti Transaksi (Optional — JPG/PNG/PDF)</label>
+                    <input type="file" id="bukti_transaksi" name="bukti_transaksi" accept="image/*,.pdf">
+                </div>
+
+                <div class="form-group">
+                    <label for="foto_barang">Foto Barang / Paket (Optional — JPG/PNG)</label>
+                    <input type="file" id="foto_barang" name="foto_barang" accept="image/*">
+                </div>
+            </div>
+
+            <div class="calc-preview" id="penjualanCalcBox">
+                <div class="calc-item">
+                    <span>Estimasi Omzet 100% (=Kredit × 5/3)</span>
+                    <strong id="prevOmzet">Rp 0</strong>
+                </div>
+                <div class="calc-item">
+                    <span>Komisi Agen 40% (=Omzet - Kredit)</span>
+                    <strong id="prevKomisi" style="color: #15803d;">Rp 0</strong>
+                </div>
+                <div class="calc-item">
+                    <span>Total + Asuransi + Packing</span>
+                    <strong id="prevTotalTagihan">Rp 0</strong>
+                </div>
+            </div>
+
+            <div style="margin-top: 18px; display: flex; gap: 10px; align-items: center;">
+                <button type="submit" id="btnSubmit" class="btn">Simpan ke Google Sheets</button>
+                <button type="button" id="btnResetForm" class="btn btn-outline">Bersihkan Form</button>
+            </div>
+        </form>
+
+        <div id="toastBox" class="toast"></div>
+    </div>
+
+    <!-- Rekap Saldo & Daftar Transaksi Bulan Terpilih -->
+    <div class="card">
+        <div class="header-row">
+            <div>
+                <h3 style="margin: 0;">Buku Harian JFS — Tab <span id="tblSheetTitle">NOV</span></h3>
+                <p class="subtitle">Data tersinkronisasi langsung dengan Google Spreadsheet di folder Google Drive Anda.</p>
+            </div>
+        </div>
+
+        <div class="summary-grid">
+            <div class="stat-box">
+                <div class="stat-label">Saldo Awal Bulan</div>
+                <div class="stat-val" id="sumSaldoAwal">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Debet (Top Up / Fee)</div>
+                <div class="stat-val text-deb" id="sumDebet">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Kredit (Potongan JFS)</div>
+                <div class="stat-val text-kred" id="sumKredit">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Saldo Akhir JFS</div>
+                <div class="stat-val" id="sumSaldoAkhir">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Omzet</div>
+                <div class="stat-val" id="sumOmzet">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Komisi 40%</div>
+                <div class="stat-val text-deb" id="sumKomisi">Rp 0</div>
+            </div>
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tgl</th>
+                        <th>Keterangan Transaksi</th>
+                        <th class="num">Debet (Rp)</th>
+                        <th class="num">Kredit (Rp)</th>
+                        <th class="num">Saldo JFS (Rp)</th>
+                        <th class="num">Omzet (Rp)</th>
+                        <th class="num">Komisi 40%</th>
+                        <th class="num">Paid / Balance</th>
+                        <th>Lampiran</th>
+                    </tr>
+                </thead>
+                <tbody id="jfsTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const MONTH_NAMES = ["", "JAN", "FEB", "MAR", "APR", "MAY", "JUNE", "JULY", "AUG", "SEPT", "OKT", "NOV", "DEC"];
+    const fmtRp = (n) => "Rp " + Number(n || 0).toLocaleString("id-ID", { maximumFractionDigits: 0 });
+
+    const tglInput = document.getElementById("tanggal");
+    const tglPaidInput = document.getElementById("tanggal_paid");
+    const jenisSelect = document.getElementById("jenis_transaksi");
+    const statusBayarSelect = document.getElementById("status_bayar");
+    const nominalJfsInput = document.getElementById("nominal_jfs");
+    const asuransiInput = document.getElementById("asuransi");
+    const packingInput = document.getElementById("packing");
+    const nominalPaidInput = document.getElementById("nominal_paid");
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    tglInput.value = todayStr;
+    tglPaidInput.value = todayStr;
+
+    function updateDynamicFields() {
+        const jenis = jenisSelect.value;
+        const isPenjualan = jenis === "PENJUALAN";
+        const isTopUp = jenis === "TOP_UP";
+        const isPengeluaran = jenis === "PENGELUARAN";
+        const isCustom = jenis === "CUSTOM";
+
+        document.querySelectorAll(".penjualan-only").forEach(el => el.style.display = isPenjualan ? "flex" : "none");
+        document.getElementById("penjualanCalcBox").style.display = isPenjualan ? "flex" : "none";
+        document.querySelectorAll(".topup-only").forEach(el => el.style.display = isTopUp ? "flex" : "none");
+        document.getElementById("grpKategoriPengeluaran").style.display = isPengeluaran ? "flex" : "none";
+        document.getElementById("grpArahCustom").style.display = isCustom ? "flex" : "none";
+
+        const showPaid = isPenjualan && statusBayarSelect.value === "LUNAS";
+        document.querySelectorAll(".paid-only").forEach(el => el.style.display = showPaid ? "flex" : "none");
+
+        const lblNominal = document.getElementById("lblNominalJfs");
+        if (isPenjualan) lblNominal.textContent = "Potongan Modal JFS 60% (Rp)";
+        else if (["FEE_INCOMING", "COD_FEE", "CASHBACK", "TOP_UP", "REFUND_DFOD"].includes(jenis)) lblNominal.textContent = "Nominal Debet Masuk (Rp)";
+        else lblNominal.textContent = "Nominal Transaksi (Rp)";
+    }
+
+    function updatePenjualanPreview() {
+        const kredit = parseFloat(nominalJfsInput.value || 0);
+        const asuransi = parseFloat(asuransiInput.value || 0);
+        const packing = parseFloat(packingInput.value || 0);
+        const omzet = Math.round(kredit * 5 / 3);
+        const komisi = omzet - kredit;
+        const total = omzet + asuransi + packing;
+
+        document.getElementById("prevOmzet").textContent = fmtRp(omzet);
+        document.getElementById("prevKomisi").textContent = fmtRp(komisi);
+        document.getElementById("prevTotalTagihan").textContent = fmtRp(total);
+
+        if (jenisSelect.value === "PENJUALAN" && !nominalPaidInput.dataset.manual) {
+            nominalPaidInput.value = omzet > 0 ? omzet : "";
+        }
+    }
+
+    nominalPaidInput.addEventListener("input", () => { nominalPaidInput.dataset.manual = "1"; });
+    [nominalJfsInput, asuransiInput, packingInput].forEach(el => el.addEventListener("input", updatePenjualanPreview));
+    jenisSelect.addEventListener("change", () => { updateDynamicFields(); updatePenjualanPreview(); });
+    statusBayarSelect.addEventListener("change", updateDynamicFields);
+
+    tglInput.addEventListener("change", () => {
+        if (tglInput.value) {
+            tglPaidInput.value = tglInput.value;
+            loadMonthData();
+        }
+    });
+
+    async function loadMonthData() {
+        const parts = (tglInput.value || todayStr).split("-");
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        const sheetName = MONTH_NAMES[month] || "NOV";
+
+        document.getElementById("activeSheetBadge").textContent = `${sheetName} (${year})`;
+        document.getElementById("tblSheetTitle").textContent = `${sheetName} (${year})`;
+
+        try {
+            const res = await fetch(`/api/jfs/list?month=${month}&year=${year}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Gagal memuat data Google Sheets.");
+            renderOverview(data);
+        } catch (err) {
+            showToast(err.message, false);
+        }
+    }
+
+    function renderOverview(data) {
+        if (data.spreadsheet_url) {
+            const btn = document.getElementById("openGsheetsBtn");
+            btn.href = data.spreadsheet_url;
+            btn.style.display = "inline-flex";
+            document.getElementById("gdriveFileLabel").textContent = `Drive: ${data.spreadsheet_title}`;
+        }
+
+        document.getElementById("sumSaldoAwal").textContent = fmtRp(data.saldo_awal);
+        document.getElementById("sumDebet").textContent = fmtRp(data.total_debet);
+        document.getElementById("sumKredit").textContent = fmtRp(data.total_kredit);
+        document.getElementById("sumSaldoAkhir").textContent = fmtRp(data.saldo_akhir);
+        document.getElementById("sumOmzet").textContent = fmtRp(data.total_omzet);
+        document.getElementById("sumKomisi").textContent = fmtRp(data.total_komisi);
+
+        const tbody = document.getElementById("jfsTableBody");
+        tbody.innerHTML = "";
+        (data.transactions || []).forEach(tx => {
+            const tr = document.createElement("tr");
+            let paidBadge = "-";
+            if (tx.paid > 0) paidBadge = `<span style="color:#15803d;font-weight:600;">PAID ${fmtRp(tx.paid)}</span>`;
+            else if (tx.balance > 0) paidBadge = `<span style="color:#d97706;font-weight:600;">PIUTANG ${fmtRp(tx.balance)}</span>`;
+
+            let links = [];
+            if (tx.bukti_url) links.push(`<a href="${tx.bukti_url}" target="_blank" class="pill-link">Bukti ↗</a>`);
+            if (tx.foto_url) links.push(`<a href="${tx.foto_url}" target="_blank" class="pill-link">Foto ↗</a>`);
+
+            tr.innerHTML = `
+                <td style="white-space:nowrap;">${tx.tanggal}</td>
+                <td><strong>${tx.keterangan}</strong><br><span style="font-size:11px;color:#6b7280;">${tx.ket_bayar !== "-" ? tx.ket_bayar : ""}</span></td>
+                <td class="num text-deb">${tx.debet > 0 ? fmtRp(tx.debet) : "-"}</td>
+                <td class="num text-kred">${tx.kredit > 0 ? fmtRp(tx.kredit) : "-"}</td>
+                <td class="num" style="font-weight:700;">${fmtRp(tx.saldo)}</td>
+                <td class="num">${tx.omzet > 0 ? fmtRp(tx.omzet) : "-"}</td>
+                <td class="num text-deb">${tx.komisi > 0 ? fmtRp(tx.komisi) : "-"}</td>
+                <td class="num">${paidBadge}</td>
+                <td style="white-space:nowrap;">${links.length ? links.join(" ") : "-"}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function showToast(msg, isOk = true) {
+        const box = document.getElementById("toastBox");
+        box.textContent = msg;
+        box.className = "toast " + (isOk ? "ok" : "err");
+        box.style.display = "block";
+        setTimeout(() => { box.style.display = "none"; }, 5000);
+    }
+
+    document.getElementById("jfsForm").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById("btnSubmit");
+        btn.disabled = true;
+        btn.textContent = "Menyimpan ke Google Sheets...";
+
+        try {
+            const formData = new FormData(e.target);
+            const res = await fetch("/api/jfs/save", { method: "POST", body: formData });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Gagal menyimpan transaksi.");
+
+            renderOverview(data);
+            showToast(`Berhasil tersimpan ke Google Sheets (${data.spreadsheet_title} — Tab ${data.sheet})!`, true);
+
+            const keptDate = tglInput.value;
+            e.target.reset();
+            tglInput.value = keptDate;
+            tglPaidInput.value = keptDate;
+            delete nominalPaidInput.dataset.manual;
+            updateDynamicFields();
+            updatePenjualanPreview();
+        } catch (err) {
+            showToast(err.message, false);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Simpan ke Google Sheets";
+        }
+    });
+
+    document.getElementById("btnResetForm").addEventListener("click", () => {
+        const keptDate = tglInput.value;
+        document.getElementById("jfsForm").reset();
+        tglInput.value = keptDate;
+        tglPaidInput.value = keptDate;
+        delete nominalPaidInput.dataset.manual;
+        updateDynamicFields();
+        updatePenjualanPreview();
+    });
+
+    updateDynamicFields();
+    loadMonthData();
+</script>
+</body>
+</html>

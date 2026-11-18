@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Setting Tarif Pajak - Admin</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 30px; color: #1f2937; }
+        .container { max-width: 1050px; margin: auto; }
+        .card { background: white; padding: 25px 30px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 25px; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .badge { background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .btn-logout { color: #dc2626; text-decoration: none; font-weight: bold; font-size: 14px; border: 1px solid #fecaca; padding: 8px 14px; border-radius: 6px; }
+        
+        .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav-link { background: white; color: #374151; border: 1px solid #d1d5db; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; }
+        .nav-link.active { background: #2563eb; color: white; border-color: #2563eb; }
+
+        .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; padding: 12px 16px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+        th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; color: #4b5563; }
+        input, select { padding: 6px 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 13px; }
+        .btn-save { background: #2563eb; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 12px; }
+        .btn-save:hover { background: #1d4ed8; }
+        .kat-btn { padding: 6px 14px; border: 1px solid #d1d5db; border-radius: 5px; text-decoration: none; color: #374151; font-weight: 600; font-size: 13px; }
+        .kat-btn.active { background: #1d4ed8; color: white; border-color: #1d4ed8; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card header">
+            <div>
+                <h2 style="margin: 0;">Halo, {{ user.nama }}!</h2>
+                <p style="margin: 5px 0 0; color: #6b7280; font-size: 14px;">{{ user.email }} • <span class="badge">{{ user.role }}</span></p>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+        </div>
+
+        <div class="nav-tabs">
+            <a href="{{ url_for('dashboard') }}" class="nav-link">Arsip Dokumen Drive</a>
+            <a href="{{ url_for('kalkulator_pph21') }}" class="nav-link">Kalkulator PPh 21 (TER & Pasal 17)</a>
+            <a href="{{ url_for('admin_tarif_pajak') }}" class="nav-link active">Setting Tarif Pajak (Admin)</a>
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- 1. Parameter Biaya Jabatan -->
+        <div class="card">
+            <h3 style="margin-top: 0;">1. Parameter Biaya Jabatan</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Deskripsi Aturan</th>
+                        <th>Nilai Saat Ini</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in params %}
+                    <tr>
+                        <form method="POST">
+                            <input type="hidden" name="action" value="update_param">
+                            <input type="hidden" name="param_key" value="{{ p[0] }}">
+                            <td>{{ p[2] }}</td>
+                            <td><input type="number" step="0.01" name="param_value" value="{{ p[1] }}" required></td>
+                            <td><button type="submit" class="btn-save">Simpan</button></td>
+                        </form>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 2. Master PTKP -->
+        <div class="card">
+            <h3 style="margin-top: 0;">2. Master PTKP & Kategori TER</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Deskripsi</th>
+                        <th>Nilai PTKP Setahun (Rp)</th>
+                        <th>Kategori TER</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in ptkp_rows %}
+                    <tr>
+                        <form method="POST">
+                            <input type="hidden" name="action" value="update_ptkp">
+                            <input type="hidden" name="kode_ptkp" value="{{ row[0] }}">
+                            <td><strong>{{ row[0] }}</strong></td>
+                            <td>{{ row[3] }}</td>
+                            <td><input type="number" name="nilai_ptkp" value="{{ row[1] }}" required></td>
+                            <td>
+                                <select name="kategori_ter">
+                                    <option value="A" {{ 'selected' if row[2] == 'A' else '' }}>A</option>
+                                    <option value="B" {{ 'selected' if row[2] == 'B' else '' }}>B</option>
+                                    <option value="C" {{ 'selected' if row[2] == 'C' else '' }}>C</option>
+                                </select>
+                            </td>
+                            <td><button type="submit" class="btn-save">Simpan</button></td>
+                        </form>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 3. Tarif Progresif Pasal 17 -->
+        <div class="card">
+            <h3 style="margin-top: 0;">3. Lapisan Tarif Progresif Pasal 17 UU HPP (Tahunan)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Lapisan</th>
+                        <th>Kapasitas Rentang PKP (Rp) <small>(Kosongkan jika tak terhingga)</small></th>
+                        <th>Tarif (%)</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in pasal17_rows %}
+                    <tr>
+                        <form method="POST">
+                            <input type="hidden" name="action" value="update_pasal17">
+                            <input type="hidden" name="lapisan_id" value="{{ row[0] }}">
+                            <td>{{ row[4] }}</td>
+                            <td><input type="number" name="kapasitas_lapisan" value="{{ row[2] if row[2] is not none else '' }}" placeholder="Tak terhingga"></td>
+                            <td><input type="number" step="0.01" name="tarif_persen" value="{{ row[3] }}" required></td>
+                            <td><button type="submit" class="btn-save">Simpan</button></td>
+                        </form>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 4. Tabel TER Bulanan -->
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 style="margin-top: 0;">4. Tabel Tarif Efektif Bulanan (TER) - Kategori {{ kategori_ter }}</h3>
+                <div style="display: flex; gap: 6px;">
+                    <a href="{{ url_for('admin_tarif_pajak', kategori='A') }}" class="kat-btn {{ 'active' if kategori_ter == 'A' else '' }}">Kategori A</a>
+                    <a href="{{ url_for('admin_tarif_pajak', kategori='B') }}" class="kat-btn {{ 'active' if kategori_ter == 'B' else '' }}">Kategori B</a>
+                    <a href="{{ url_for('admin_tarif_pajak', kategori='C') }}" class="kat-btn {{ 'active' if kategori_ter == 'C' else '' }}">Kategori C</a>
+                </div>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Batas Atas Bruto Bulanan (Rp) <small>(Kosongkan untuk lapisan tertinggi)</small></th>
+                        <th>Tarif TER (%)</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in ter_rows %}
+                    <tr>
+                        <form method="POST">
+                            <input type="hidden" name="action" value="update_ter">
+                            <input type="hidden" name="ter_id" value="{{ row[0] }}">
+                            <input type="hidden" name="kategori_aktif" value="{{ kategori_ter }}">
+                            <td>{{ loop.index }}</td>
+                            <td><input type="number" name="batas_atas" value="{{ row[2] if row[2] is not none else '' }}" placeholder="Tak terhingga"></td>
+                            <td><input type="number" step="0.01" name="tarif_persen" value="{{ row[3] }}" required></td>
+                            <td><button type="submit" class="btn-save">Simpan</button></td>
+                        </form>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

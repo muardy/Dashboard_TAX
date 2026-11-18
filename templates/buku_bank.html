@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Konverter Rekening Koran ke Buku Bank (Excel)</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-hover: #1d4ed8;
+            --bg: #f3f4f6;
+            --card: #ffffff;
+            --border: #e5e7eb;
+            --text: #111827;
+            --muted: #6b7280;
+            --green-bg: #dcfce7;
+            --green-text: #166534;
+            --red-bg: #fee2e2;
+            --red-text: #991b1b;
+        }
+        * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+        body { background: var(--bg); color: var(--text); margin: 0; padding: 24px; }
+        .container { max-width: 1180px; margin: 0 auto; }
+        .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .back-link { text-decoration: none; color: var(--primary); font-weight: 600; font-size: 14px; }
+        .back-link:hover { text-decoration: underline; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+        }
+        h2 { margin: 0 0 6px 0; font-size: 22px; }
+        .subtitle { margin: 0 0 16px 0; color: var(--muted); font-size: 13.5px; }
+        .bank-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+        .badge-bank {
+            background: #eff6ff; color: #1e40af; border: 1px solid #bfdbfe;
+            padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+        }
+        .dropzone {
+            border: 2px dashed #93c5fd;
+            background: #f8fafc;
+            border-radius: 10px;
+            padding: 32px 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .dropzone:hover, .dropzone.dragover { background: #eff6ff; border-color: var(--primary); }
+        .dropzone-title { font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+        .dropzone-hint { color: var(--muted); font-size: 13px; }
+        .btn {
+            background: var(--primary); color: #fff; border: none; border-radius: 7px;
+            padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
+            display: inline-flex; align-items: center; gap: 8px; transition: background 0.15s;
+        }
+        .btn:hover { background: var(--primary-hover); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .btn-success { background: #15803d; }
+        .btn-success:hover { background: #166534; }
+        .btn-outline {
+            background: #fff; color: var(--text); border: 1px solid #d1d5db;
+        }
+        .btn-outline:hover { background: #f9fafb; }
+        .alert-error {
+            background: var(--red-bg); color: var(--red-text); border: 1px solid #fecaca;
+            padding: 12px 16px; border-radius: 8px; margin-top: 14px; font-size: 13.5px; display: none;
+        }
+        .summary-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 14px; margin-bottom: 18px;
+        }
+        .stat-box {
+            border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; background: #fafafa;
+        }
+        .stat-label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+        .stat-value { font-size: 17px; font-weight: 700; }
+        .text-in { color: #15803d; }
+        .text-out { color: #dc2626; }
+        .recon-pill {
+            display: inline-block; padding: 3px 10px; border-radius: 999px;
+            font-size: 12px; font-weight: 700; margin-top: 4px;
+        }
+        .recon-ok { background: var(--green-bg); color: var(--green-text); }
+        .recon-warn { background: var(--red-bg); color: var(--red-text); }
+        .toolbar {
+            display: flex; flex-wrap: wrap; justify-content: space-between;
+            align-items: center; gap: 12px; margin-bottom: 14px;
+        }
+        .search-input {
+            padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 7px;
+            font-size: 13.5px; min-width: 260px;
+        }
+        .filter-group { display: flex; gap: 6px; }
+        .filter-btn {
+            padding: 7px 12px; border-radius: 6px; border: 1px solid #d1d5db;
+            background: #fff; font-size: 13px; cursor: pointer; font-weight: 500;
+        }
+        .filter-btn.active { background: #eff6ff; border-color: var(--primary); color: var(--primary); font-weight: 600; }
+        .table-wrap { overflow-x: auto; max-height: 540px; border: 1px solid var(--border); border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        thead th {
+            position: sticky; top: 0; background: #1e3a8a; color: #fff;
+            padding: 10px 12px; text-align: left; font-weight: 600; z-index: 2;
+        }
+        tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        tbody tr:nth-child(even) { background: #f8fafc; }
+        .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+        .cat-select {
+            padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 5px;
+            font-size: 12.5px; background: #fff; width: 100%;
+        }
+        .loader { display: none; margin-top: 14px; font-size: 13.5px; color: var(--primary); font-weight: 600; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="topbar">
+        <a href="/dashboard" class="back-link">← Kembali ke Dashboard</a>
+        <span style="font-size: 12.5px; color: var(--muted);">Auto-Rekonsiliasi Saldo &amp; Ekualisasi SPT</span>
+    </div>
+
+    <div class="card">
+        <h2>Konverter Rekening Koran ke Buku Bank (.xlsx)</h2>
+        <p class="subtitle">
+            Upload e-Statement PDF dari bank mana pun di Indonesia. Sistem otomatis mendeteksi bank, memisahkan mutasi masuk/keluar, mengategorikan transaksi, dan menghitung saldo berjalan berumus Excel.
+        </p>
+
+        <div class="bank-badges">
+            <span class="badge-bank">BCA</span>
+            <span class="badge-bank">BRI</span>
+            <span class="badge-bank">Mandiri</span>
+            <span class="badge-bank">BNI</span>
+            <span class="badge-bank">BSI</span>
+            <span class="badge-bank">CIMB Niaga</span>
+            <span class="badge-bank">Permata</span>
+            <span class="badge-bank">Bank Jago</span>
+            <span class="badge-bank">SeaBank</span>
+            <span class="badge-bank">OCBC / Danamon / BPD &amp; Semua Bank Indonesia</span>
+        </div>
+
+        <div id="dropzone" class="dropzone">
+            <input type="file" id="pdfInput" accept=".pdf" hidden>
+            <div class="dropzone-title" id="fileLabel">Klik untuk memilih atau tarik file PDF e-Statement ke sini</div>
+            <div class="dropzone-hint">Gunakan file PDF e-Statement asli dari Mobile Banking / Internet Banking (bukan foto scan).</div>
+        </div>
+
+        <div style="margin-top: 16px; display: flex; gap: 10px; align-items: center;">
+            <button id="btnProcess" class="btn" disabled>Proses &amp; Preview Buku Bank</button>
+            <button id="btnReset" class="btn btn-outline" type="button">Reset</button>
+        </div>
+
+        <div id="loader" class="loader">Sedang mengekstrak &amp; merekonsiliasi transaksi dari PDF...</div>
+        <div id="errorBox" class="alert-error"></div>
+    </div>
+
+    <!-- Hasil Preview & Download -->
+    <div id="resultSection" class="card" style="display: none;">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 18px;">
+            <div>
+                <h3 id="resBankTitle" style="margin: 0 0 4px 0;">Buku Bank</h3>
+                <div id="resAccountInfo" style="font-size: 13px; color: var(--muted);"></div>
+            </div>
+            <button id="btnDownloadExcel" class="btn btn-success">
+                Download Spreadsheet Buku Bank (.xlsx)
+            </button>
+        </div>
+
+        <div class="summary-grid">
+            <div class="stat-box">
+                <div class="stat-label">Saldo Awal</div>
+                <div class="stat-value" id="statSaldoAwal">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Mutasi Masuk (Kredit)</div>
+                <div class="stat-value text-in" id="statTotalMasuk">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Total Mutasi Keluar (Debet)</div>
+                <div class="stat-value text-out" id="statTotalKeluar">Rp 0</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Saldo Akhir &amp; Rekonsiliasi</div>
+                <div class="stat-value" id="statSaldoAkhir">Rp 0</div>
+                <div id="statReconBadge"></div>
+            </div>
+        </div>
+
+        <div class="toolbar">
+            <div class="filter-group">
+                <button class="filter-btn active" data-filter="ALL">Semua (<span id="cntAll">0</span>)</button>
+                <button class="filter-btn" data-filter="IN">Mutasi Masuk (<span id="cntIn">0</span>)</button>
+                <button class="filter-btn" data-filter="OUT">Mutasi Keluar (<span id="cntOut">0</span>)</button>
+            </div>
+            <input type="text" id="searchInput" class="search-input" placeholder="Cari keterangan atau lawan transaksi...">
+        </div>
+
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 48px;">No</th>
+                        <th style="width: 105px;">Tanggal</th>
+                        <th>Keterangan / Uraian</th>
+                        <th style="width: 190px;">Lawan Transaksi</th>
+                        <th style="width: 220px;">Kategori Akun (Bisa Diedit)</th>
+                        <th class="num" style="width: 145px;">Masuk (Rp)</th>
+                        <th class="num" style="width: 145px;">Keluar (Rp)</th>
+                        <th class="num" style="width: 155px;">Saldo (Rp)</th>
+                    </tr>
+                </thead>
+                <tbody id="txTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    const CATEGORIES = [
+        "Penerimaan Transfer / Usaha",
+        "Pengeluaran Transfer / Operasional",
+        "Setoran Tunai",
+        "Tarik Tunai ATM",
+        "Pembayaran QRIS / EDC",
+        "Pembayaran Virtual Account / Tagihan",
+        "Beban Gaji / Payroll",
+        "Biaya Administrasi Bank",
+        "Pendapatan Bunga / Bagi Hasil",
+        "Pajak Bunga Bank (PPh Final)",
+        "Setoran Modal / Prive",
+        "Lain-lain"
+    ];
+
+    let parsedData = null;
+    let currentFilter = "ALL";
+
+    const dropzone = document.getElementById("dropzone");
+    const pdfInput = document.getElementById("pdfInput");
+    const fileLabel = document.getElementById("fileLabel");
+    const btnProcess = document.getElementById("btnProcess");
+    const btnReset = document.getElementById("btnReset");
+    const loader = document.getElementById("loader");
+    const errorBox = document.getElementById("errorBox");
+    const resultSection = document.getElementById("resultSection");
+
+    const formatRp = (val) => "Rp " + Number(val || 0).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    dropzone.addEventListener("click", () => pdfInput.click());
+    dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+    dropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        dropzone.classList.remove("dragover");
+        if (e.dataTransfer.files.length) {
+            pdfInput.files = e.dataTransfer.files;
+            handleFileSelected();
+        }
+    });
+    pdfInput.addEventListener("change", handleFileSelected);
+
+    function handleFileSelected() {
+        errorBox.style.display = "none";
+        if (pdfInput.files.length > 0) {
+            fileLabel.textContent = "File dipilih: " + pdfInput.files[0].name;
+            btnProcess.disabled = false;
+        }
+    }
+
+    btnReset.addEventListener("click", () => {
+        pdfInput.value = "";
+        fileLabel.textContent = "Klik untuk memilih atau tarik file PDF e-Statement ke sini";
+        btnProcess.disabled = true;
+        errorBox.style.display = "none";
+        resultSection.style.display = "none";
+        parsedData = null;
+    });
+
+    btnProcess.addEventListener("click", async () => {
+        if (!pdfInput.files.length) return;
+        errorBox.style.display = "none";
+        loader.style.display = "block";
+        btnProcess.disabled = true;
+
+        const formData = new FormData();
+        formData.append("file", pdfInput.files[0]);
+
+        try {
+            const res = await fetch("/api/buku-bank/preview", { method: "POST", body: formData });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Gagal memproses PDF rekening koran.");
+
+            parsedData = data;
+            renderPreview();
+        } catch (err) {
+            errorBox.textContent = err.message;
+            errorBox.style.display = "block";
+        } finally {
+            loader.style.display = "none";
+            btnProcess.disabled = false;
+        }
+    });
+
+    function renderPreview() {
+        const { meta, transactions } = parsedData;
+        resultSection.style.display = "block";
+
+        document.getElementById("resBankTitle").textContent = `${meta.bank} — Buku Bank`;
+        document.getElementById("resAccountInfo").textContent =
+            `No. Rek: ${meta.no_rekening} | Pemilik: ${meta.nama_pemilik} | Periode: ${meta.periode}`;
+
+        document.getElementById("statSaldoAwal").textContent = formatRp(meta.saldo_awal);
+        document.getElementById("statTotalMasuk").textContent = formatRp(meta.total_masuk);
+        document.getElementById("statTotalKeluar").textContent = formatRp(meta.total_keluar);
+        document.getElementById("statSaldoAkhir").textContent = formatRp(meta.saldo_akhir_hitung);
+
+        const reconBadge = document.getElementById("statReconBadge");
+        if (meta.is_reconciled) {
+            reconBadge.innerHTML = `<span class="recon-pill recon-ok">MATCH / VALID (0 Selisih)</span>`;
+        } else {
+            reconBadge.innerHTML = `<span class="recon-pill recon-warn">Selisih: ${formatRp(meta.selisih)}</span>`;
+        }
+
+        document.getElementById("cntAll").textContent = transactions.length;
+        document.getElementById("cntIn").textContent = transactions.filter(t => t.masuk > 0).length;
+        document.getElementById("cntOut").textContent = transactions.filter(t => t.keluar > 0).length;
+
+        renderTable();
+    }
+
+    function renderTable() {
+        const keyword = document.getElementById("searchInput").value.toLowerCase();
+        const tbody = document.getElementById("txTableBody");
+        tbody.innerHTML = "";
+
+        const filtered = parsedData.transactions.filter(tx => {
+            if (currentFilter === "IN" && tx.masuk <= 0) return false;
+            if (currentFilter === "OUT" && tx.keluar <= 0) return false;
+            if (keyword) {
+                const hay = `${tx.keterangan} ${tx.lawan_transaksi} ${tx.kategori}`.toLowerCase();
+                if (!hay.includes(keyword)) return false;
+            }
+            return true;
+        });
+
+        filtered.forEach((tx) => {
+            const tr = document.createElement("tr");
+            const optionsHtml = CATEGORIES.map(c =>
+                `<option value="${c}" ${c === tx.kategori ? "selected" : ""}>${c}</option>`
+            ).join("");
+
+            tr.innerHTML = `
+                <td>${tx.no}</td>
+                <td style="white-space:nowrap;">${tx.tanggal}</td>
+                <td style="white-space:pre-line;">${tx.keterangan}</td>
+                <td>${tx.lawan_transaksi}</td>
+                <td><select class="cat-select" data-no="${tx.no}">${optionsHtml}</select></td>
+                <td class="num text-in">${tx.masuk > 0 ? formatRp(tx.masuk) : "-"}</td>
+                <td class="num text-out">${tx.keluar > 0 ? formatRp(tx.keluar) : "-"}</td>
+                <td class="num" style="font-weight:600;">${formatRp(tx.saldo)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Simpan perubahan kategori langsung ke state parsedData
+        tbody.querySelectorAll(".cat-select").forEach(sel => {
+            sel.addEventListener("change", (e) => {
+                const rowNo = Number(e.target.dataset.no);
+                const item = parsedData.transactions.find(t => t.no === rowNo);
+                if (item) item.kategori = e.target.value;
+            });
+        });
+    }
+
+    document.querySelectorAll(".filter-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".filter-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            currentFilter = btn.dataset.filter;
+            renderTable();
+        });
+    });
+
+    document.getElementById("searchInput").addEventListener("input", renderTable);
+
+    document.getElementById("btnDownloadExcel").addEventListener("click", async () => {
+        if (!parsedData) return;
+        const btn = document.getElementById("btnDownloadExcel");
+        btn.disabled = true;
+        btn.textContent = "Menyiapkan Excel...";
+
+        try {
+            const res = await fetch("/api/buku-bank/export", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(parsedData)
+            });
+            if (!res.ok) throw new Error("Gagal mengekspor file Excel.");
+
+            const blob = await res.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            const safeRek = (parsedData.meta.no_rekening || "Rekening").replace(/[^a-zA-Z0-9]/g, "_");
+            a.href = url;
+            a.download = `Buku_Bank_${safeRek}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            window.URL.revokeObjectURL(url);
+        } catch (err) {
+            alert(err.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = "Download Spreadsheet Buku Bank (.xlsx)";
+        }
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Kalkulator PPh 21 - Portal Dokumen Pajak</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 30px; color: #1f2937; }
+        .container { max-width: 1050px; margin: auto; }
+        .card { background: white; padding: 25px 30px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 25px; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .badge { background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .btn-logout { color: #dc2626; text-decoration: none; font-weight: bold; font-size: 14px; border: 1px solid #fecaca; padding: 8px 14px; border-radius: 6px; }
+        .btn-logout:hover { background: #fee2e2; }
+
+        .nav-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .nav-link { background: white; color: #374151; border: 1px solid #d1d5db; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; }
+        .nav-link.active { background: #2563eb; color: white; border-color: #2563eb; }
+
+        .mode-switch { display: flex; gap: 10px; border-bottom: 2px solid #e5e7eb; padding-bottom: 15px; margin-bottom: 20px; }
+        .mode-btn { padding: 10px 16px; border: 1px solid #d1d5db; background: #f9fafb; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; }
+        .mode-btn.selected { background: #eff6ff; border-color: #2563eb; color: #1d4ed8; }
+
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.full { grid-column: span 2; }
+        label { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #374151; }
+        small.hint { color: #6b7280; font-size: 11px; margin-top: 4px; }
+        input, select { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+        input:focus, select:focus { outline: none; border-color: #2563eb; }
+
+        .btn-group { display: flex; gap: 10px; margin-top: 15px; }
+        .btn-submit { background: #2563eb; color: white; border: none; padding: 12px 22px; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; }
+        .btn-submit:hover { background: #1d4ed8; }
+        .btn-reset { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; padding: 12px 18px; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        .btn-reset:hover { background: #e5e7eb; }
+
+        .result-box { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; margin-top: 20px; }
+        .result-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .result-table td { padding: 8px 4px; border-bottom: 1px dashed #e2e8f0; }
+        .result-table tr.sub-item td { color: #475569; font-size: 13px; padding: 6px 4px; }
+        .result-table tr.sub-item td:first-child { padding-left: 16px; }
+        .result-table tr.total td { border-top: 2px solid #94a3b8; border-bottom: none; font-weight: bold; font-size: 16px; color: #0f172a; padding-top: 12px; }
+        .legal-note { font-size: 12px; color: #64748b; margin-top: 15px; background: #f1f5f9; padding: 10px 14px; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="card header">
+            <div>
+                <h2 style="margin: 0;">Halo, {{ user.nama }}!</h2>
+                <p style="margin: 5px 0 0; color: #6b7280; font-size: 14px;">{{ user.email }} • <span class="badge">{{ user.role }}</span></p>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+        </div>
+
+        <!-- Navigasi Menu -->
+        <div class="nav-tabs">
+            <a href="{{ url_for('dashboard') }}" class="nav-link">Arsip Dokumen Drive</a>
+            <a href="{{ url_for('kalkulator_pph21') }}" class="nav-link active">Kalkulator PPh 21 (TER & Pasal 17)</a>
+            {% if user.role == 'Admin' %}
+            <a href="{{ url_for('admin_tarif_pajak') }}" class="nav-link">Setting Tarif Pajak (Admin)</a>
+            {% endif %}
+        </div>
+
+        <div class="card">
+            <h3 style="margin-top: 0; margin-bottom: 4px;">Kalkulator PPh Pasal 21 (Pegawai Tetap & Kontrak / PKWT)</h3>
+            <p style="margin-top: 0; margin-bottom: 18px; color: #6b7280; font-size: 13px;">
+                Berlaku untuk pegawai tetap (PKWTT) maupun pegawai kontrak (PKWT) dengan gaji bulanan teratur sesuai PP 58/2023 &amp; PMK 168/2023.
+            </p>
+            
+            <div class="mode-switch">
+                <button type="button" id="btn-bulanan" class="mode-btn {{ 'selected' if active_tab == 'bulanan' else '' }}" onclick="switchMode('bulanan')">
+                    1. Masa Pajak Jan – Nov (Skema TER)
+                </button>
+                <button type="button" id="btn-tahunan" class="mode-btn {{ 'selected' if active_tab == 'tahunan' else '' }}" onclick="switchMode('tahunan')">
+                    2. Masa Pajak Terakhir / Desember (Tarif Pasal 17)
+                </button>
+            </div>
+
+            <!-- Form 1: Bulanan TER -->
+            <form id="form-bulanan" method="POST" style="display: {{ 'block' if active_tab == 'bulanan' else 'none' }};">
+                <input type="hidden" name="mode" value="bulanan">
+                <div class="form-grid">
+                    <div class="form-group full">
+                        <label>Status PTKP (Penghasilan Tidak Kena Pajak) *</label>
+                        <select name="status_ptkp" required>
+                            {% for kode, info in ptkp_list.items() %}
+                                <option value="{{ kode }}" {{ 'selected' if hasil and hasil.mode == 'bulanan' and hasil.status_ptkp == kode else '' }}>
+                                    {{ info.label }} (Kategori TER {{ info.kategori }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Gaji Pokok Sebulan (Rp) *</label>
+                        <input type="text" name="gaji_pokok" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.gaji_pokok | rupiah if hasil and hasil.mode == 'bulanan' and hasil.gaji_pokok else '' }}" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Tunjangan Tetap / Tidak Tetap (Rp)</label>
+                        <input type="text" name="tunjangan" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.tunjangan | rupiah if hasil and hasil.mode == 'bulanan' and hasil.tunjangan else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Bonus / THR / Lembur Bulan Ini (Rp)</label>
+                        <input type="text" name="bonus_thr" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.bonus_thr | rupiah if hasil and hasil.mode == 'bulanan' and hasil.bonus_thr else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Premi Asuransi Dibayar Pemberi Kerja (Rp)</label>
+                        <input type="text" name="premi_pemberi_kerja" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.premi_pemberi_kerja | rupiah if hasil and hasil.mode == 'bulanan' and hasil.premi_pemberi_kerja else '' }}">
+                        <small class="hint">Contoh: JKK, JKM, dan BPJS Kesehatan porsi perusahaan</small>
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button type="submit" class="btn-submit">Hitung PPh 21 Bulanan (TER)</button>
+                    <button type="button" class="btn-reset" onclick="resetCalc('form-bulanan')">Reset Form</button>
+                </div>
+            </form>
+
+            <!-- Form 2: Tahunan / Masa Pajak Terakhir -->
+            <form id="form-tahunan" method="POST" style="display: {{ 'block' if active_tab == 'tahunan' else 'none' }};">
+                <input type="hidden" name="mode" value="tahunan">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Status PTKP Awal Tahun *</label>
+                        <select name="status_ptkp" required>
+                            {% for kode, info in ptkp_list.items() %}
+                                <option value="{{ kode }}" {{ 'selected' if hasil and hasil.mode == 'tahunan' and hasil.status_ptkp == kode else '' }}>
+                                    {{ info.label }} (PTKP Rp {{ info.ptkp | rupiah }})
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Jumlah Bulan Bekerja dalam Setahun *</label>
+                        <input type="number" name="jumlah_bulan" min="1" max="12"
+                               value="{{ hasil.jumlah_bulan_kerja if hasil and hasil.mode == 'tahunan' else 12 }}" required>
+                        <small class="hint">Menentukan batas maksimal Biaya Jabatan (Rp 500rb/bulan)</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Total Penghasilan Bruto Setahun (Rp) *</label>
+                        <input type="text" name="bruto_setahun" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.bruto_setahun | rupiah if hasil and hasil.mode == 'tahunan' and hasil.bruto_setahun else '' }}" required>
+                        <small class="hint">Akumulasi gaji, tunjangan, THR, bonus, & premi perusahaan Jan–Des</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Iuran Pensiun / JHT / JP Dibayar Karyawan Setahun (Rp)</label>
+                        <input type="text" name="iuran_pensiun" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.iuran_pensiun_setahun | rupiah if hasil and hasil.mode == 'tahunan' and hasil.iuran_pensiun_setahun else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Zakat / Sumbangan Keagamaan Wajib via Perusahaan (Rp)</label>
+                        <input type="text" name="zakat" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.zakat_setahun | rupiah if hasil and hasil.mode == 'tahunan' and hasil.zakat_setahun else '' }}">
+                    </div>
+                    <div class="form-group">
+                        <label>Total PPh 21 Sudah Dipotong (Jan – Nov) (Rp)</label>
+                        <input type="text" name="pph21_dipotong" class="rupiah-input" placeholder="0"
+                               value="{{ hasil.pph21_sudah_dipotong | rupiah if hasil and hasil.mode == 'tahunan' and hasil.pph21_sudah_dipotong else '' }}">
+                        <small class="hint">Akumulasi potongan TER dari bulan Januari sampai November</small>
+                    </div>
+                </div>
+                <div class="btn-group">
+                    <button type="submit" class="btn-submit">Hitung PPh 21 Setahun & Kurang/Lebih Bayar Desember</button>
+                    <button type="button" class="btn-reset" onclick="resetCalc('form-tahunan')">Reset Form</button>
+                </div>
+            </form>
+
+            <!-- Hasil Perhitungan -->
+            {% if hasil %}
+            <div id="result-box" class="result-box">
+                {% if hasil.mode == 'bulanan' %}
+                    <h4 style="margin-top: 0; color: #1d4ed8;">Hasil Perhitungan Bulanan (Skema TER - PP 58/2023)</h4>
+                    <table class="result-table">
+                        <tr>
+                            <td>Status PTKP / Kategori TER</td>
+                            <td style="text-align: right;"><strong>{{ hasil.status_ptkp }} (Kategori {{ hasil.kategori_ter }})</strong></td>
+                        </tr>
+                        <tr class="sub-item">
+                            <td>• Gaji Pokok Sebulan</td>
+                            <td style="text-align: right;">Rp {{ hasil.gaji_pokok | rupiah }}</td>
+                        </tr>
+                        <tr class="sub-item">
+                            <td>• Tunjangan Tetap / Tidak Tetap</td>
+                            <td style="text-align: right;">Rp {{ hasil.tunjangan | rupiah }}</td>
+                        </tr>
+                        <tr class="sub-item">
+                            <td>• Bonus / THR / Lembur Bulan Ini</td>
+                            <td style="text-align: right;">Rp {{ hasil.bonus_thr | rupiah }}</td>
+                        </tr>
+                        <tr class="sub-item">
+                            <td>• Premi Asuransi Dibayar Pemberi Kerja</td>
+                            <td style="text-align: right;">Rp {{ hasil.premi_pemberi_kerja | rupiah }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Total Penghasilan Bruto Sebulan</strong></td>
+                            <td style="text-align: right;"><strong>Rp {{ hasil.total_bruto | rupiah }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>Tarif Efektif Rata-rata (TER)</td>
+                            <td style="text-align: right;"><strong>{{ hasil.tarif_ter }}%</strong></td>
+                        </tr>
+                        <tr class="total">
+                            <td>PPh Pasal 21 Terutang Bulan Ini</td>
+                            <td style="text-align: right; color: #1d4ed8;">Rp {{ hasil.pph21_terutang | rupiah }}</td>
+                        </tr>
+                    </table>
+                    <div class="legal-note">
+                        <strong>Dasar Hukum:</strong> PP No. 58 Tahun 2023 & PMK No. 168 Tahun 2023. Untuk Masa Pajak Januari–November, PPh 21 dihitung langsung dari Penghasilan Bruto dikalikan tarif efektif bulanan sesuai kategori PTKP tanpa pengurangan biaya jabatan maupun PTKP bulanan.
+                    </div>
+                {% else %}
+                    <h4 style="margin-top: 0; color: #1d4ed8;">Hasil Perhitungan Masa Pajak Terakhir / Desember (UU HPP Pasal 17)</h4>
+                    <table class="result-table">
+                        <tr>
+                            <td>Status PTKP & Masa Kerja</td>
+                            <td style="text-align: right;"><strong>{{ hasil.status_ptkp }} ({{ hasil.jumlah_bulan_kerja }} Bulan Bekerja)</strong></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Total Penghasilan Bruto Setahun</strong></td>
+                            <td style="text-align: right;"><strong>Rp {{ hasil.bruto_setahun | rupiah }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>(-) Biaya Jabatan (5%, Maks. Rp 500rb/bln)</td>
+                            <td style="text-align: right; color: #dc2626;">- Rp {{ hasil.biaya_jabatan | rupiah }}</td>
+                        </tr>
+                        <tr>
+                            <td>(-) Iuran Pensiun / JHT / JP Sendiri</td>
+                            <td style="text-align: right; color: #dc2626;">- Rp {{ hasil.iuran_pensiun_setahun | rupiah }}</td>
+                        </tr>
+                        <tr>
+                            <td>(-) Zakat / Sumbangan Keagamaan Wajib</td>
+                            <td style="text-align: right; color: #dc2626;">- Rp {{ hasil.zakat_setahun | rupiah }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Penghasilan Neto Setahun</strong></td>
+                            <td style="text-align: right;"><strong>Rp {{ hasil.neto_setahun | rupiah }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>(-) PTKP ({{ hasil.status_ptkp }})</td>
+                            <td style="text-align: right; color: #dc2626;">- Rp {{ hasil.nilai_ptkp | rupiah }}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Penghasilan Kena Pajak (PKP - Dibulatkan Ribuan ke Bawah)</strong></td>
+                            <td style="text-align: right;"><strong>Rp {{ hasil.pkp | rupiah }}</strong></td>
+                        </tr>
+                        {% for lap in hasil.rincian_lapisan %}
+                        <tr>
+                            <td style="padding-left: 16px; color: #475569;">• {{ lap.label }} (DPP: Rp {{ lap.dasar_pengenaan | rupiah }})</td>
+                            <td style="text-align: right;">Rp {{ lap.pajak | rupiah }}</td>
+                        </tr>
+                        {% endfor %}
+                        <tr>
+                            <td><strong>Total PPh 21 Terutang Setahun</strong></td>
+                            <td style="text-align: right;"><strong>Rp {{ hasil.pph21_setahun | rupiah }}</strong></td>
+                        </tr>
+                        <tr>
+                            <td>(-) PPh 21 yang Sudah Dipotong (Jan – Nov)</td>
+                            <td style="text-align: right;">- Rp {{ hasil.pph21_sudah_dipotong | rupiah }}</td>
+                        </tr>
+                        <tr class="total">
+                            <td>{{ 'PPh 21 Kurang Bayar (Dipotong Bulan Desember)' if hasil.selisih_desember >= 0 else 'PPh 21 Lebih Bayar (Dikembalikan ke Pegawai)' }}</td>
+                            <td style="text-align: right; color: {{ '#1d4ed8' if hasil.selisih_desember >= 0 else '#16a34a' }};">
+                                Rp {{ (hasil.selisih_desember if hasil.selisih_desember >= 0 else -hasil.selisih_desember) | rupiah }}
+                            </td>
+                        </tr>
+                    </table>
+                    <div class="legal-note">
+                        <strong>Dasar Hukum:</strong> Pasal 17 ayat (1) huruf a UU PPh (UU No. 7 Tahun 2021 / UU HPP) & PMK No. 168 Tahun 2023. PKP dibulatkan ke bawah hingga ribuan penuh sebelum dikalikan lapisan tarif progresif.
+                    </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <script>
+        function switchMode(mode) {
+            document.getElementById('form-bulanan').style.display = mode === 'bulanan' ? 'block' : 'none';
+            document.getElementById('form-tahunan').style.display = mode === 'tahunan' ? 'block' : 'none';
+            document.getElementById('btn-bulanan').classList.toggle('selected', mode === 'bulanan');
+            document.getElementById('btn-tahunan').classList.toggle('selected', mode === 'tahunan');
+        }
+
+        function resetCalc(formId) {
+            const form = document.getElementById(formId);
+            form.querySelectorAll('input[type="text"]').forEach(el => el.value = '');
+            const bulanInput = form.querySelector('input[name="jumlah_bulan"]');
+            if (bulanInput) bulanInput.value = 12;
+            const sel = form.querySelector('select');
+            if (sel) sel.selectedIndex = 0;
+            const resBox = document.getElementById('result-box');
+            if (resBox) resBox.style.display = 'none';
+        }
+
+        document.querySelectorAll('.rupiah-input').forEach(function(input) {
+            input.addEventListener('input', function(e) {
+                let raw = this.value.replace(/\D/g, '');
+                this.value = raw ? parseInt(raw, 10).toLocaleString('id-ID') : '';
+            });
+        });
+    </script>
+</body>
+</html>

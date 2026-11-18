@@ -1,0 +1,12 @@
+flask
+gunicorn
+python-dotenv
+psycopg2-binary
+authlib
+requests
+pdfplumber
+openpyxl
+google-api-python-client
+google-auth
+google-auth-oauthlib
+werkzeug
