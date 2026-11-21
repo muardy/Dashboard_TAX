@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard - Portal Dokumen Pajak</title>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 30px; color: #1f2937; }
+        .container { max-width: 1050px; margin: auto; }
+        .card { background: white; padding: 25px 30px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); margin-bottom: 25px; }
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        .badge { background: #dcfce7; color: #166534; padding: 4px 10px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .btn-logout { color: #dc2626; text-decoration: none; font-weight: bold; font-size: 14px; border: 1px solid #fecaca; padding: 8px 14px; border-radius: 6px; }
+        .btn-logout:hover { background: #fee2e2; }
+        
+        .alert { padding: 12px 16px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; }
+        .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .alert-error { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.full { grid-column: span 2; }
+        label { font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #374151; }
+        input, select { padding: 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+        input:focus, select:focus { outline: none; border-color: #2563eb; }
+        .btn-submit { background: #2563eb; color: white; border: none; padding: 12px 20px; border-radius: 6px; font-size: 14px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .btn-submit:hover { background: #1d4ed8; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 13px; }
+        th, td { text-align: left; padding: 12px 10px; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f9fafb; font-weight: 600; color: #4b5563; }
+        tr:hover { background: #f9fafb; }
+        .btn-drive { background: #eff6ff; color: #1d4ed8; padding: 5px 10px; border-radius: 5px; text-decoration: none; font-weight: 600; font-size: 12px; }
+        .btn-drive:hover { background: #dbeafe; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="card header">
+            <div>
+                <h2 style="margin: 0;">Halo, {{ user.nama }}!</h2>
+                <p style="margin: 5px 0 0; color: #6b7280; font-size: 14px;">{{ user.email }} • <span class="badge">{{ user.role }}</span></p>
+            </div>
+            <a href="{{ url_for('logout') }}" class="btn-logout">Logout</a>
+        </div>
+
+        <!-- Bar Navigasi Atas (Tabs) -->
+        <div style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px;">
+            <a href="{{ url_for('dashboard') }}" style="background: #2563eb; color: white; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">Arsip Dokumen Drive</a>
+            <a href="{{ url_for('kalkulator_pph21') }}" style="background: white; color: #374151; border: 1px solid #d1d5db; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">Kalkulator PPh 21 (TER & Pasal 17)</a>
+            <a href="/buku-bank" style="background: white; color: #374151; border: 1px solid #d1d5db; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">Konverter Buku Bank</a>
+            <a href="/jfs-transaksi" style="background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">Transaksi JFS (J&amp;T Cargo)</a>
+            {% if user.role == 'Admin' %}
+            <a href="{{ url_for('admin_tarif_pajak') }}" style="background: white; color: #374151; border: 1px solid #d1d5db; padding: 10px 18px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px;">Setting Tarif Pajak (Admin)</a>
+            {% endif %}
+        </div>
+
+        <!-- Grid 2 Kolom untuk Card Buku Bank & Card JFS -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 25px;">
+            <!-- Card Menu: Konverter Rekening Koran ke Buku Bank -->
+            <div class="menu-card" style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="background: #eff6ff; color: #1d4ed8; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px;">
+                            PEMBUKUAN &amp; EKUALISASI
+                        </span>
+                        <span style="font-size: 12px; color: #15803d; font-weight: 600;">All Bank ID</span>
+                    </div>
+                    <h3 style="margin: 0 0 8px 0; font-size: 18px; color: #111827;">Konverter Buku Bank (.xlsx)</h3>
+                    <p style="margin: 0 0 18px 0; font-size: 13.5px; color: #6b7280; line-height: 1.5;">
+                        Ubah e-Statement PDF rekening koran (BCA, BRI, Mandiri, BNI, dll.) menjadi Spreadsheet Buku Bank berumus otomatis &amp; siap ekualisasi SPT.
+                    </p>
+                </div>
+                <a href="/buku-bank" style="display: inline-block; text-align: center; background: #2563eb; color: #ffffff; text-decoration: none; padding: 10px 16px; border-radius: 7px; font-size: 14px; font-weight: 600;">
+                    Buka Konverter Buku Bank →
+                </a>
+            </div>
+
+            <!-- Card Menu: Input Transaksi JFS (J&T Cargo) -->
+            <div class="menu-card" style="background: #ffffff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="background: #fef2f2; color: #b91c1c; font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px;">
+                            OPERASIONAL J&amp;T CARGO
+                        </span>
+                        <span style="font-size: 12px; color: #dc2626; font-weight: 600;">Google Sheets</span>
+                    </div>
+                    <h3 style="margin: 0 0 8px 0; font-size: 18px; color: #111827;">Input Transaksi JFS</h3>
+                    <p style="margin: 0 0 18px 0; font-size: 13.5px; color: #6b7280; line-height: 1.5;">
+                        Catat penjualan resi, Fee Incoming, COD, Top Up &amp; pengeluaran harian langsung ke Google Sheets di Google Drive lengkap dengan bukti transfer &amp; foto barang.
+                    </p>
+                </div>
+                <a href="/jfs-transaksi" style="display: inline-block; text-align: center; background: #dc2626; color: #ffffff; text-decoration: none; padding: 10px 16px; border-radius: 7px; font-size: 14px; font-weight: 600;">
+                    Buka Form Transaksi JFS →
+                </a>
+            </div>
+        </div>
+
+        <!-- Notifikasi Flash -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Form Upload Dokumen -->
+        <div class="card">
+            <h3 style="margin-top: 0; margin-bottom: 18px;">Upload Dokumen Pajak Klien</h3>
+            <form action="{{ url_for('upload_dokumen') }}" method="POST" enctype="multipart/form-data">
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Nama Klien / Perusahaan *</label>
+                        <input type="text" name="nama_klien" placeholder="Contoh: PT Maju Jaya Abadi" required>
+                    </div>
+                    <div class="form-group">
+                        <label>NPWP (Opsional)</label>
+                        <input type="text" name="npwp" placeholder="Contoh: 01.234.567.8-901.000">
+                    </div>
+                    <div class="form-group">
+                        <label>Jenis Dokumen *</label>
+                        <select name="jenis_dokumen" required>
+                            <option value="">-- Pilih Jenis Dokumen --</option>
+                            <option value="SPT Masa PPh 21">SPT Masa PPh 21</option>
+                            <option value="SPT Masa PPN">SPT Masa PPN</option>
+                            <option value="SPT Tahunan Badan">SPT Tahunan Badan</option>
+                            <option value="SPT Tahunan Pribadi">SPT Tahunan Pribadi</option>
+                            <option value="Rekening Koran">Rekening Koran</option>
+                            <option value="Laporan Keuangan">Laporan Keuangan</option>
+                            <option value="Faktur Pajak / Bukti Potong">Faktur Pajak / Bukti Potong</option>
+                            <option value="Lainnya">Lainnya</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Masa / Tahun Pajak *</label>
+                        <input type="text" name="masa_pajak" placeholder="Contoh: Oktober 2026 atau Tahun 2025" required>
+                    </div>
+                    <div class="form-group full">
+                        <label>Pilih File Dokumen (PDF, Excel, CSV, ZIP, Gambar) *</label>
+                        <input type="file" name="dokumen" required>
+                    </div>
+                </div>
+                <button type="submit" class="btn-submit">Upload ke Google Drive</button>
+            </form>
+        </div>
+
+        <!-- Tabel Riwayat Upload -->
+        <div class="card">
+            <h3 style="margin-top: 0;">Riwayat Dokumen Terunggah</h3>
+            {% if documents %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Waktu Upload</th>
+                        <th>Nama Klien</th>
+                        <th>Jenis Dokumen</th>
+                        <th>Masa Pajak</th>
+                        <th>Nama File</th>
+                        <th>Diunggah Oleh</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for doc in documents %}
+                    <tr>
+                        <td>{{ doc[8].strftime('%d/%m/%Y %H:%M') if doc[8] else '-' }}</td>
+                        <td><strong>{{ doc[1] }}</strong><br><small style="color:#6b7280;">{{ doc[2] }}</small></td>
+                        <td>{{ doc[3] }}</td>
+                        <td>{{ doc[4] }}</td>
+                        <td>{{ doc[5] }}</td>
+                        <td>{{ doc[7] }}</td>
+                        <td><a href="{{ doc[6] }}" target="_blank" class="btn-drive">Buka Drive</a></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p style="color: #6b7280; font-size: 14px;">Belum ada dokumen yang diunggah.</p>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>

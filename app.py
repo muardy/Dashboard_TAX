@@ -1,26 +1,30 @@
 import os
+from datetime import datetime
 import psycopg2
-from flask import Flask, redirect, url_for, session, render_template, flash, request
+from flask import Flask, redirect, url_for, session, render_template, flash, request, send_file, jsonify
 from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
+from werkzeug.middleware.proxy_fix import ProxyFix
+
 from drive_service import upload_file_to_drive
 from pph21_service import get_ptkp_dict, hitung_pph21_bulanan_ter, hitung_pph21_tahunan_pasal17
-from flask import render_template, request, send_file, jsonify
 from services.bank_converter import parse_statement_pdf, build_buku_bank_excel
-from datetime import datetime
-from flask import render_template, request, jsonify
 from services.jfs_ledger import (
     append_jfs_transaction_to_gdrive,
     get_gdrive_month_overview,
     upload_attachment_to_drive,
 )
+from services.project_explorer import project_bp
 
 load_dotenv()
 
 app = Flask(__name__)
-from werkzeug.middleware.proxy_fix import ProxyFix
 app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
-app.secret_key = os.getenv("SECRET_KEY")
+app.secret_key = os.getenv("SECRET_KEY", "rahasia")
+
+# Daftarkan Blueprint Folder Project Explorer
+app.register_blueprint(project_bp)
+
 
 @app.template_filter('rupiah')
 def format_rupiah(value):
@@ -28,6 +32,7 @@ def format_rupiah(value):
         return f"{int(value):,}".replace(",", ".")
     except (ValueError, TypeError):
         return "0"
+
 
 oauth = OAuth(app)
 google = oauth.register(
@@ -38,8 +43,10 @@ google = oauth.register(
     client_kwargs={'scope': 'openid email profile'}
 )
 
+
 def get_db_connection():
     return psycopg2.connect(os.getenv("DATABASE_URL"))
+
 
 def get_user_from_db(email):
     conn = None
@@ -57,16 +64,19 @@ def get_user_from_db(email):
         if conn:
             conn.close()
 
+
 @app.route('/')
 def index():
     if 'user' in session:
         return redirect(url_for('dashboard'))
     return render_template('login.html')
 
+
 @app.route('/login')
 def login():
     redirect_uri = url_for('authorize', _external=True)
     return google.authorize_redirect(redirect_uri)
+
 
 @app.route('/authorize')
 def authorize():
@@ -94,8 +104,22 @@ def authorize():
     }
     return redirect(url_for('dashboard'))
 
+
+# ==========================================
+# DASHBOARD UTAMA = WINDOWS FILE EXPLORER
+# ==========================================
 @app.route('/dashboard')
 def dashboard():
+    if 'user' not in session:
+        return redirect(url_for('index'))
+    return render_template('dashboard.html', user=session['user'])
+
+
+# ==========================================
+# ARSIP DOKUMEN DRIVE (DASHBOARD LAMA)
+# ==========================================
+@app.route('/arsip-drive')
+def arsip_drive():
     if 'user' not in session:
         return redirect(url_for('index'))
 
@@ -119,7 +143,8 @@ def dashboard():
         if conn:
             conn.close()
 
-    return render_template('dashboard.html', user=session['user'], documents=documents)
+    return render_template('arsip_drive.html', user=session['user'], documents=documents)
+
 
 @app.route('/upload', methods=['POST'])
 def upload_dokumen():
@@ -134,12 +159,12 @@ def upload_dokumen():
 
     if not nama_klien or not jenis_dokumen or not masa_pajak or not file or file.filename == '':
         flash("Semua kolom wajib (kecuali NPWP) dan file dokumen harus diisi!", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('arsip_drive'))
 
     parent_folder_id = os.getenv("GDRIVE_PARENT_FOLDER_ID")
     if not parent_folder_id:
         flash("Konfigurasi GDRIVE_PARENT_FOLDER_ID di .env belum diisi!", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('arsip_drive'))
 
     conn = None
     try:
@@ -179,7 +204,8 @@ def upload_dokumen():
         if conn:
             conn.close()
 
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('arsip_drive'))
+
 
 @app.route('/kalkulator-pph21', methods=['GET', 'POST'])
 def kalkulator_pph21():
@@ -223,6 +249,7 @@ def kalkulator_pph21():
         hasil=hasil,
         active_tab=active_tab
     )
+
 
 @app.route('/admin/tarif-pajak', methods=['GET', 'POST'])
 def admin_tarif_pajak():
@@ -285,7 +312,6 @@ def admin_tarif_pajak():
                 flash("Tarif TER berhasil diperbarui!", "success")
                 return redirect(url_for('admin_tarif_pajak', kategori=kategori_ter))
 
-        # Ambil semua data referensi untuk ditampilkan
         cur.execute("SELECT param_key, param_value, deskripsi FROM ref_parameter_pajak ORDER BY param_key")
         params = cur.fetchall()
 
@@ -316,9 +342,12 @@ def admin_tarif_pajak():
     finally:
         if conn:
             conn.close()
+
+
 @app.route("/buku-bank")
 def buku_bank_page():
     return render_template("buku_bank.html")
+
 
 @app.route("/api/buku-bank/preview", methods=["POST"])
 def api_buku_bank_preview():
@@ -335,6 +364,7 @@ def api_buku_bank_preview():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
 @app.route("/api/buku-bank/export", methods=["POST"])
 def api_buku_bank_export():
     payload = request.get_json(silent=True)
@@ -349,9 +379,12 @@ def api_buku_bank_export():
         download_name=f"Buku_Bank_{safe_rek}.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
 @app.route("/jfs-transaksi")
 def jfs_transaksi_page():
     return render_template("jfs_transaksi.html")
+
 
 @app.route("/api/jfs/list", methods=["GET"])
 def api_jfs_list():
@@ -362,12 +395,12 @@ def api_jfs_list():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
 @app.route("/api/jfs/save", methods=["POST"])
 def api_jfs_save():
     try:
         tanggal = request.form.get("tanggal") or datetime.now().strftime("%Y-%m-%d")
 
-        # Langsung upload bukti & foto ke Google Drive (jika user melampirkan)
         bukti_url = upload_attachment_to_drive(request.files.get("bukti_transaksi"), "BUKTI", tanggal)
         foto_url = upload_attachment_to_drive(request.files.get("foto_barang"), "FOTO_BARANG", tanggal)
 
@@ -396,10 +429,12 @@ def api_jfs_save():
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
+
 @app.route('/logout')
 def logout():
     session.pop('user', None)
     return redirect(url_for('index'))
+
 
 if __name__ == '__main__':
     app.run(debug=True)
