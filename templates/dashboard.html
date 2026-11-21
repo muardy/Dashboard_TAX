@@ -60,10 +60,26 @@
     .btn-primary {
       background: #2563eb; color: #fff; border: none; padding: 9px 18px;
       border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer;
-      transition: all 0.15s;
+      transition: all 0.15s; display: inline-flex; align-items: center; gap: 8px;
     }
     .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
-    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary:disabled { opacity: 0.65; cursor: not-allowed; }
+
+    .btn-danger {
+      background: #fff; border: 1px solid #fca5a5; color: #dc2626;
+      padding: 7px 14px; border-radius: 8px; font-weight: 600; font-size: 13px; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-danger:hover:not(:disabled) { background: #fef2f2; border-color: #f87171; }
+    .btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* Loading Spinner */
+    .spinner {
+      width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4);
+      border-top-color: #fff; border-radius: 50%;
+      animation: spin 0.7s linear infinite; display: inline-block;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Filter & Search Bar */
     .filter-bar {
@@ -111,6 +127,15 @@
     .st-IDLE { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; }
     .st-ON_PROGRESS { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
     .st-DONE { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
+
+    .btn-card-delete {
+      background: none; border: 1px solid transparent; border-radius: 6px;
+      padding: 2px 6px; font-size: 13px; cursor: pointer; color: #94a3b8;
+      transition: all 0.15s;
+    }
+    .btn-card-delete:hover {
+      background: #fef2f2; border-color: #fecaca; color: #dc2626;
+    }
 
     .card-title {
       font-size: 17px; font-weight: 700; color: #0f172a; margin: 0 0 8px 0; line-height: 1.35;
@@ -336,7 +361,10 @@
             <span id="detailKategori" class="card-category"></span>
             <h3 id="detailTitle" style="margin:6px 0 0 0; font-size:21px; color:#0f172a;"></h3>
           </div>
-          <div style="font-size:20px; font-weight:800; color:#1e293b;" id="detailPctText">0%</div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="font-size:20px; font-weight:800; color:#1e293b;" id="detailPctText">0%</div>
+            <button type="button" class="btn-danger" id="btnDeleteDetail" onclick="deleteCurrentProject()">🗑️ Hapus Pekerjaan</button>
+          </div>
         </div>
 
         <div class="progress-bar-wrap">
@@ -441,8 +469,11 @@
       <input type="text" id="inpTasks" placeholder="Contoh: Kumpul Rekening Koran, Rekap Excel, Lapor SPT" />
     </div>
     <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:18px;">
-      <button type="button" class="btn-secondary" onclick="closeCreateModal()">Batal</button>
-      <button type="button" class="btn-primary" onclick="submitCreateProject()">Simpan & Buat Card</button>
+      <button type="button" id="btnCancelCreate" class="btn-secondary" onclick="closeCreateModal()">Batal</button>
+      <button type="button" id="btnSubmitCreate" class="btn-primary" onclick="submitCreateProject()">
+        <span id="createBtnSpinner" class="spinner" style="display:none;"></span>
+        <span id="createBtnText">Simpan & Buat Card</span>
+      </button>
     </div>
   </div>
 </div>
@@ -453,11 +484,12 @@
   let currentFilter = "ALL";
   let activeProjectId = null;
   let modalSelectedUserIds = new Set();
+  let isCreatingProject = false;
 
   // State untuk draft perubahan di Detail Card
   let originalDetailState = null;
   let draftDetailState = null;
-  let stagedFiles = []; // Array of File objects yang belum diupload
+  let stagedFiles = [];
   let isDirty = false;
 
   function escapeHtml(str) {
@@ -546,7 +578,10 @@
           <div>
             <div class="card-top">
               <span class="card-category">${escapeHtml(p.kategori)}</span>
-              <span class="status-pill st-${p.status}">${labelMap[p.status]}</span>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="status-pill st-${p.status}">${labelMap[p.status]}</span>
+                <button type="button" class="btn-card-delete" title="Hapus pekerjaan ini" onclick="deleteProjectFromCard(event, ${p.project_id})">🗑️</button>
+              </div>
             </div>
             <h4 class="card-title">${escapeHtml(p.nama_project)}</h4>
             <div class="card-summary ${summaryText ? "" : "empty"}">
@@ -571,6 +606,58 @@
         </div>
       `;
     }).join("");
+  }
+
+  // --- Hapus Pekerjaan (Dari Card Depan maupun dari Detail View) ---
+  async function deleteProjectFromCard(event, projectId) {
+    event.stopPropagation();
+    const target = allProjects.find(p => p.project_id === projectId);
+    const title = target ? target.nama_project : "pekerjaan ini";
+    if (!confirm(`Yakin ingin menghapus "${title}"?`)) return;
+
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.innerText = "⏳";
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.status === "ok") {
+        await loadProjects();
+      } else {
+        alert("Gagal menghapus pekerjaan: " + (data.message || "Terjadi kesalahan"));
+        btn.disabled = false;
+        btn.innerText = "🗑️";
+      }
+    } catch (err) {
+      alert("Gagal menghubungi server.");
+      btn.disabled = false;
+      btn.innerText = "🗑️";
+    }
+  }
+
+  async function deleteCurrentProject() {
+    if (!activeProjectId) return;
+    const title = draftDetailState ? draftDetailState.nama_project : "pekerjaan ini";
+    if (!confirm(`Yakin ingin menghapus "${title}" beserta seluruh tahapan dan daftar filenya?`)) return;
+
+    const btn = document.getElementById("btnDeleteDetail");
+    btn.disabled = true;
+    btn.innerText = "Menghapus...";
+
+    try {
+      const res = await fetch(`/api/projects/${activeProjectId}`, { method: "DELETE" });
+      const data = await res.json();
+      if (data.status === "ok") {
+        isDirty = false;
+        goBackBoard();
+      } else {
+        alert("Gagal menghapus pekerjaan: " + (data.message || "Terjadi kesalahan"));
+      }
+    } finally {
+      btn.disabled = false;
+      btn.innerText = "🗑️ Hapus Pekerjaan";
+    }
   }
 
   function cloneState(obj) {
@@ -667,7 +754,6 @@
       btn.className = "btn-status" + (d.status === st ? ` active-${st}` : "");
     });
 
-    // Render Pilihan PIC (Draft)
     const assignedSet = new Set(d.assigned_ids);
     const picSelector = document.getElementById("detailPicSelector");
     picSelector.innerHTML = masterUsers.map(u => {
@@ -680,7 +766,6 @@
       `;
     }).join("");
 
-    // Render Checklist Lama + Draft Baru
     const taskList = document.getElementById("taskList");
     const existingHtml = d.tasks.map((t, idx) => `
       <div class="task-item">
@@ -821,7 +906,6 @@
     setDirty(true);
   }
 
-  // --- Staging File Upload (Masuk Draft, Upload Pas Klik Simpan Perubahan) ---
   function stageProjectFiles() {
     const fileInput = document.getElementById("projectFileInput");
     if (!fileInput.files.length) return;
@@ -836,14 +920,12 @@
   function removeStagedFile(idx) {
     stagedFiles.splice(idx, 1);
     renderFileGrid();
-    // Cek apakah masih ada perubahan lain selain file yang baru dihapus
     const hasOtherChanges =
       JSON.stringify({ ...draftDetailState, files: null }) !==
       JSON.stringify({ ...originalDetailState, files: null });
     setDirty(stagedFiles.length > 0 || hasOtherChanges);
   }
 
-  // --- Tombol Formal Batal & Simpan Perubahan (Termasuk Upload File) ---
   function cancelDetailChanges() {
     draftDetailState = cloneState(originalDetailState);
     stagedFiles = [];
@@ -861,7 +943,6 @@
     btnCancel.disabled = true;
 
     try {
-      // 1. Upload semua file yang di-stage ke Google Drive terlebih dahulu
       if (stagedFiles.length > 0) {
         for (let i = 0; i < stagedFiles.length; i++) {
           btnSave.innerText = `Mengupload file (${i + 1}/${stagedFiles.length})...`;
@@ -881,7 +962,6 @@
         }
       }
 
-      // 2. Simpan seluruh perubahan status, PIC, checklist, & ringkasan
       btnSave.innerText = "Menyimpan perubahan...";
       const res = await fetch(`/api/projects/${activeProjectId}/save`, {
         method: "POST",
@@ -925,14 +1005,16 @@
     loadProjects();
   }
 
-  // --- Modal Buat Card Baru ---
+  // --- Modal Buat Card Baru (Dengan Loading & Anti Double-Click) ---
   function openCreateModal() {
+    if (isCreatingProject) return;
     modalSelectedUserIds.clear();
     renderModalPicSelector();
     document.getElementById("createModal").style.display = "flex";
   }
 
   function closeCreateModal() {
+    if (isCreatingProject) return;
     document.getElementById("inpNamaProject").value = "";
     document.getElementById("inpCatatan").value = "";
     document.getElementById("inpTasks").value = "";
@@ -940,6 +1022,7 @@
   }
 
   function toggleModalPic(userId) {
+    if (isCreatingProject) return;
     if (modalSelectedUserIds.has(userId)) modalSelectedUserIds.delete(userId);
     else modalSelectedUserIds.add(userId);
     renderModalPicSelector();
@@ -958,31 +1041,59 @@
     }).join("");
   }
 
+  function setCreateModalLoading(loading) {
+    isCreatingProject = loading;
+    const btnSubmit = document.getElementById("btnSubmitCreate");
+    const btnCancel = document.getElementById("btnCancelCreate");
+    const spinner = document.getElementById("createBtnSpinner");
+    const btnText = document.getElementById("createBtnText");
+
+    btnSubmit.disabled = loading;
+    btnCancel.disabled = loading;
+    spinner.style.display = loading ? "inline-block" : "none";
+    btnText.innerText = loading ? "Menyimpan & Membuat Folder..." : "Simpan & Buat Card";
+  }
+
   async function submitCreateProject() {
-    const nama = document.getElementById("inpNamaProject").value;
+    if (isCreatingProject) return;
+
+    const nama = document.getElementById("inpNamaProject").value.trim();
+    if (!nama) {
+      alert("Judul pekerjaan / klien wajib diisi!");
+      return;
+    }
+
     const kategori = document.getElementById("inpKategori").value;
     const catatan = document.getElementById("inpCatatan").value;
     const tasksRaw = document.getElementById("inpTasks").value;
     const tasks = tasksRaw ? tasksRaw.split(",") : [];
     const assigneeIds = Array.from(modalSelectedUserIds);
 
-    const res = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        nama_project: nama,
-        kategori,
-        catatan_terakhir: catatan,
-        tasks,
-        assignee_ids: assigneeIds,
-      }),
-    });
-    const data = await res.json();
-    if (data.status === "ok") {
-      closeCreateModal();
-      loadProjects();
-    } else {
-      alert(data.message);
+    setCreateModalLoading(true);
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nama_project: nama,
+          kategori,
+          catatan_terakhir: catatan,
+          tasks,
+          assignee_ids: assigneeIds,
+        }),
+      });
+      const data = await res.json();
+      if (data.status === "ok") {
+        setCreateModalLoading(false);
+        closeCreateModal();
+        await loadProjects();
+      } else {
+        alert(data.message || "Gagal membuat card pekerjaan.");
+      }
+    } catch (err) {
+      alert("Terjadi gangguan koneksi ke server.");
+    } finally {
+      setCreateModalLoading(false);
     }
   }
 

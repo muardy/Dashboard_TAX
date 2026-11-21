@@ -477,3 +477,39 @@ def api_upload_project_file(project_id):
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         conn.close()
+# ==========================================
+# 9. API HAPUS PEKERJAAN / PROJECT
+# ==========================================
+@project_bp.route("/api/projects/<int:project_id>", methods=["DELETE"])
+def api_delete_project(project_id):
+    conn = _get_db()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT gdrive_folder_id FROM projects WHERE project_id = %s", (project_id,))
+            proj = cur.fetchone()
+            if not proj:
+                return jsonify({"status": "error", "message": "Pekerjaan tidak ditemukan"}), 404
+
+            gdrive_folder_id = proj.get("gdrive_folder_id")
+            parent_id = os.getenv("GDRIVE_PARENT_FOLDER_ID")
+
+            # Pindahkan subfolder ke Trash Google Drive (aman, bukan hapus permanen)
+            if gdrive_folder_id and gdrive_folder_id != parent_id:
+                try:
+                    drive_svc = get_drive_service()
+                    drive_svc.files().update(
+                        fileId=gdrive_folder_id,
+                        body={"trashed": True}
+                    ).execute()
+                except Exception as e:
+                    print(f"[WARN] Gagal memindahkan folder Drive ke trash: {e}")
+
+            # Hapus project dari PostgreSQL (tasks, files, assignees otomatis terhapus)
+            cur.execute("DELETE FROM projects WHERE project_id = %s", (project_id,))
+        conn.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        conn.close()
