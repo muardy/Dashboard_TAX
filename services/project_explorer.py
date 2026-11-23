@@ -159,8 +159,19 @@ def api_create_project():
                     (project_id, int(uid)),
                 )
 
+            if assignee_ids:
+                _push_project_notification(
+                    cur,
+                    project_id,
+                    assignee_ids,
+                    f"menugaskan Anda pada pekerjaan baru \"{nama}\".",
+                )
+
         conn.commit()
         return jsonify({"status": "ok", "project_id": project_id})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         conn.close()
 
@@ -322,6 +333,7 @@ def api_toggle_task(task_id):
     finally:
         conn.close()
 
+
 # ==========================================
 # 7B. API SIMPAN SEMUA PERUBAHAN DETAIL CARD SEKALIGUS
 # ==========================================
@@ -331,7 +343,7 @@ def api_save_project_changes(project_id):
     new_status = data.get("status", "IDLE")
     status_manually_set = bool(data.get("status_manually_set", False))
     catatan = (data.get("catatan_terakhir") or "").strip()
-    assignee_ids = data.get("assignee_ids") or []
+    assignee_ids = [int(x) for x in (data.get("assignee_ids") or [])]
     existing_tasks = data.get("existing_tasks") or []
     deleted_task_ids = data.get("deleted_task_ids") or []
     new_tasks = data.get("new_tasks") or []
@@ -339,9 +351,20 @@ def api_save_project_changes(project_id):
     conn = _get_db()
     try:
         with conn.cursor() as cur:
+            cur.execute("SELECT nama_project, status, catatan_terakhir FROM projects WHERE project_id = %s", (project_id,))
+            old_proj = cur.fetchone() or {}
+            nama_project = old_proj.get("nama_project", "Pekerjaan")
+
+            cur.execute("SELECT user_id FROM project_assignees WHERE project_id = %s", (project_id,))
+            old_assignees = set(r["user_id"] for r in cur.fetchall())
+            new_assignees_set = set(assignee_ids)
+
+            cur.execute("SELECT task_id, is_done FROM project_tasks WHERE project_id = %s", (project_id,))
+            old_task_states = {r["task_id"]: bool(r["is_done"]) for r in cur.fetchall()}
+
             # 1. Sinkronkan daftar PIC (project_assignees)
             cur.execute("DELETE FROM project_assignees WHERE project_id = %s", (project_id,))
-            for uid in set(int(x) for x in assignee_ids):
+            for uid in new_assignees_set:
                 cur.execute(
                     "INSERT INTO project_assignees (project_id, user_id) VALUES (%s, %s)",
                     (project_id, uid),
@@ -355,16 +378,23 @@ def api_save_project_changes(project_id):
                 )
 
             # 3. Update status centang task lama
+            tasks_toggled = False
             for t in existing_tasks:
+                tid = int(t["task_id"])
+                new_done = bool(t.get("is_done"))
+                if tid in old_task_states and old_task_states[tid] != new_done:
+                    tasks_toggled = True
                 cur.execute(
                     "UPDATE project_tasks SET is_done = %s WHERE task_id = %s AND project_id = %s",
-                    (bool(t.get("is_done")), int(t["task_id"]), project_id),
+                    (new_done, tid, project_id),
                 )
 
             # 4. Masukkan task baru
+            added_task_count = 0
             for nt in new_tasks:
                 judul = (nt.get("judul_task") or "").strip()
                 if judul:
+                    added_task_count += 1
                     cur.execute(
                         "INSERT INTO project_tasks (project_id, judul_task, is_done) VALUES (%s, %s, %s)",
                         (project_id, judul, bool(nt.get("is_done", False))),
@@ -411,6 +441,38 @@ def api_save_project_changes(project_id):
                 (final_status, final_pct, catatan, project_id),
             )
 
+            # 6. Kirim notifikasi ke PIC baru & PIC lama yang di-assign
+            newly_added_pics = new_assignees_set - old_assignees
+            if newly_added_pics:
+                _push_project_notification(
+                    cur,
+                    project_id,
+                    newly_added_pics,
+                    f"menambahkan Anda sebagai PIC pada pekerjaan \"{nama_project}\".",
+                )
+
+            changes_desc = []
+            if old_proj.get("status") != final_status:
+                changes_desc.append(f"status → {final_status.replace('_', ' ')}")
+            if added_task_count > 0:
+                changes_desc.append(f"+{added_task_count} tahapan baru")
+            if deleted_task_ids:
+                changes_desc.append(f"{len(deleted_task_ids)} tahapan dihapus")
+            if tasks_toggled:
+                changes_desc.append(f"progres tahapan ({done_cnt}/{total})")
+            if (old_proj.get("catatan_terakhir") or "").strip() != catatan:
+                changes_desc.append("ringkasan diperbarui")
+
+            retained_pics = new_assignees_set & old_assignees
+            if retained_pics and changes_desc:
+                summary_str = ", ".join(changes_desc)
+                _push_project_notification(
+                    cur,
+                    project_id,
+                    retained_pics,
+                    f"memperbarui \"{nama_project}\" ({summary_str}).",
+                )
+
         conn.commit()
         return jsonify({"status": "ok"})
     except Exception as e:
@@ -418,6 +480,8 @@ def api_save_project_changes(project_id):
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         conn.close()
+
+
 # ==========================================
 # 8. API UPLOAD FILE KE GOOGLE DRIVE
 # ==========================================
@@ -437,7 +501,7 @@ def api_upload_project_file(project_id):
     conn = _get_db()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT gdrive_folder_id FROM projects WHERE project_id = %s", (project_id,))
+            cur.execute("SELECT nama_project, gdrive_folder_id FROM projects WHERE project_id = %s", (project_id,))
             proj = cur.fetchone()
             if not proj:
                 return jsonify({"status": "error", "message": "Project tidak ditemukan"}), 404
@@ -471,12 +535,26 @@ def api_upload_project_file(project_id):
                 (project_id, filename, ext, gdrive_id, gdrive_link, uploader),
             )
             cur.execute("UPDATE projects SET updated_at = NOW() WHERE project_id = %s", (project_id,))
+
+            cur.execute("SELECT user_id FROM project_assignees WHERE project_id = %s", (project_id,))
+            pic_ids = [r["user_id"] for r in cur.fetchall()]
+            if pic_ids:
+                _push_project_notification(
+                    cur,
+                    project_id,
+                    pic_ids,
+                    f"mengunggah dokumen \"{filename}\" ke \"{proj['nama_project']}\".",
+                )
+
         conn.commit()
         return jsonify({"status": "ok"})
     except Exception as e:
+        conn.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         conn.close()
+
+
 # ==========================================
 # 9. API HAPUS PEKERJAAN / PROJECT
 # ==========================================
@@ -506,6 +584,123 @@ def api_delete_project(project_id):
 
             # Hapus project dari PostgreSQL (tasks, files, assignees otomatis terhapus)
             cur.execute("DELETE FROM projects WHERE project_id = %s", (project_id,))
+        conn.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+# ==========================================
+# 10. SISTEM NOTIFIKASI USER (ASSIGNED PROJECTS)
+# ==========================================
+_NOTIF_TABLE_INITIALIZED = False
+
+
+def _ensure_notif_table(cur):
+    global _NOTIF_TABLE_INITIALIZED
+    if _NOTIF_TABLE_INITIALIZED:
+        return
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_notifications (
+            notif_id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES master_user(user_id) ON DELETE CASCADE,
+            project_id INTEGER REFERENCES projects(project_id) ON DELETE CASCADE,
+            actor_name VARCHAR(150),
+            message TEXT NOT NULL,
+            is_read BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    _NOTIF_TABLE_INITIALIZED = True
+
+
+def _get_current_user_info(cur):
+    user_sess = session.get("user") or {}
+    email = (user_sess.get("email") or "").strip()
+    nama = (user_sess.get("nama") or user_sess.get("nama_lengkap") or email or "Rekan Tim").strip()
+    uid = user_sess.get("user_id")
+    if not uid and email:
+        cur.execute("SELECT user_id, nama_lengkap FROM master_user WHERE LOWER(email) = LOWER(%s) LIMIT 1", (email,))
+        row = cur.fetchone()
+        if row:
+            uid = row["user_id"]
+            nama = row.get("nama_lengkap") or nama
+    return uid, nama
+
+
+def _push_project_notification(cur, project_id, target_user_ids, message, exclude_actor=True):
+    _ensure_notif_table(cur)
+    actor_id, actor_name = _get_current_user_info(cur)
+    for uid in set(int(x) for x in (target_user_ids or [])):
+        if exclude_actor and actor_id and int(uid) == int(actor_id):
+            continue
+        cur.execute(
+            """
+            INSERT INTO user_notifications (user_id, project_id, actor_name, message)
+            VALUES (%s, %s, %s, %s)
+            """,
+            (uid, project_id, actor_name, f"{actor_name} {message}"),
+        )
+
+
+@project_bp.route("/api/notifications", methods=["GET"])
+def api_get_notifications():
+    conn = _get_db()
+    try:
+        with conn.cursor() as cur:
+            _ensure_notif_table(cur)
+            uid, _ = _get_current_user_info(cur)
+            if not uid:
+                conn.commit()
+                return jsonify({"status": "ok", "notifications": [], "unread_count": 0})
+
+            cur.execute(
+                """
+                SELECT n.notif_id, n.project_id, n.actor_name, n.message, n.is_read,
+                       TO_CHAR(n.created_at, 'DD Mon YYYY, HH24:MI') AS created_at,
+                       p.nama_project
+                FROM user_notifications n
+                LEFT JOIN projects p ON p.project_id = n.project_id
+                WHERE n.user_id = %s
+                ORDER BY n.created_at DESC
+                LIMIT 25
+                """,
+                (uid,),
+            )
+            rows = cur.fetchall()
+            unread_count = sum(1 for r in rows if not r["is_read"])
+        conn.commit()
+        return jsonify({"status": "ok", "notifications": rows, "unread_count": unread_count})
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        conn.close()
+
+
+@project_bp.route("/api/notifications/read", methods=["POST"])
+def api_mark_notifications_read():
+    data = request.get_json() or {}
+    notif_id = data.get("notif_id")
+    conn = _get_db()
+    try:
+        with conn.cursor() as cur:
+            _ensure_notif_table(cur)
+            uid, _ = _get_current_user_info(cur)
+            if uid:
+                if notif_id:
+                    cur.execute(
+                        "UPDATE user_notifications SET is_read = TRUE WHERE notif_id = %s AND user_id = %s",
+                        (int(notif_id), uid),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE user_notifications SET is_read = TRUE WHERE user_id = %s AND is_read = FALSE",
+                        (uid,),
+                    )
         conn.commit()
         return jsonify({"status": "ok"})
     except Exception as e:
