@@ -1088,11 +1088,81 @@
   </div>
 
 <script>
+  // Inject CSS untuk Toast Notifikasi & Banner Sync Otomatis
+  (function injectRealtimeStyles() {
+    const style = document.createElement("style");
+    style.textContent = `
+      .live-toast-container {
+        position: fixed;
+        bottom: 22px;
+        right: 22px;
+        z-index: 90;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        max-width: 360px;
+      }
+      .live-toast {
+        background: #0f172a;
+        color: #f8fafc;
+        border-left: 4px solid #3b82f6;
+        border-radius: 12px;
+        padding: 13px 16px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.25);
+        cursor: pointer;
+        animation: toastSlideIn 0.25s ease-out;
+        font-size: 13px;
+        line-height: 1.4;
+      }
+      .live-toast:hover { background: #1e293b; }
+      .live-toast-title {
+        font-size: 11.5px;
+        font-weight: 800;
+        color: #60a5fa;
+        margin-bottom: 3px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      @keyframes toastSlideIn {
+        from { opacity: 0; transform: translateY(14px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .remote-update-banner {
+        display: none;
+        background: #fef3c7;
+        border: 1px solid #f59e0b;
+        color: #92400e;
+        padding: 10px 14px;
+        border-radius: 10px;
+        margin-bottom: 14px;
+        font-size: 13px;
+        font-weight: 600;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+      }
+      .btn-reload-remote {
+        background: #d97706;
+        color: #fff;
+        border: none;
+        padding: 5px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .btn-reload-remote:hover { background: #b45309; }
+    `;
+    document.head.appendChild(style);
+  })();
+
   let allProjects = [];
   let masterUsers = [];
   let userNotifications = [];
   let currentFilter = "ALL";
   let activeProjectId = null;
+  let activeProjectFingerprint = "";
   let modalSelectedUserIds = new Set();
   let isCreatingProject = false;
 
@@ -1100,6 +1170,11 @@
   let draftDetailState = null;
   let stagedFiles = [];
   let isDirty = false;
+
+  // State Real-time Sync
+  let isSyncing = false;
+  let lastKnownNotifId = 0;
+  const BASE_PAGE_TITLE = document.title;
 
   const NAV_SERVICES = [
     { label: "Board Pekerjaan", desc: "Daftar card & progres klien", href: "/dashboard" },
@@ -1109,6 +1184,143 @@
     { label: "Transaksi JFS (J&T Cargo)", desc: "Rekap resi & setoran logistik", href: "/jfs-transaksi" },
     { label: "Setting Tarif Pajak (Admin)", desc: "Konfigurasi lapisan PTKP & TER", href: "/admin/tarif-pajak" },
   ];
+
+  function getProjectFingerprint(p) {
+    if (!p) return "";
+    return JSON.stringify({
+      status: p.status,
+      progress_pct: p.progress_pct,
+      catatan_terakhir: p.catatan_terakhir || "",
+      file_count: p.file_count || 0,
+      task_done: p.task_done || 0,
+      task_total: p.task_total || 0,
+      assignees: (p.assignees || []).map(a => a.user_id).sort(),
+    });
+  }
+
+  function showLiveToast(notif) {
+    let container = document.getElementById("liveToastContainer");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "liveToastContainer";
+      container.className = "live-toast-container";
+      document.body.appendChild(container);
+    }
+
+    const toast = document.createElement("div");
+    toast.className = "live-toast";
+    toast.innerHTML = `
+      <div class="live-toast-title">
+        <span>🔔 Pembaruan Pekerjaan</span>
+        <span style="color:#94a3b8; font-weight:500;">Baru saja</span>
+      </div>
+      <div>${escapeHtml(notif.message)}</div>
+    `;
+    toast.onclick = () => {
+      toast.remove();
+      openNotificationItem(notif.notif_id, notif.project_id || null);
+    };
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      if (toast.parentNode) toast.remove();
+    }, 6000);
+  }
+
+  function ensureRemoteBanner() {
+    let banner = document.getElementById("remoteUpdateBanner");
+    if (!banner) {
+      const detailPanel = document.querySelector(".detail-panel");
+      if (detailPanel) {
+        banner = document.createElement("div");
+        banner.id = "remoteUpdateBanner";
+        banner.className = "remote-update-banner";
+        banner.innerHTML = `
+          <span>⚠️ Rekan tim baru saja memperbarui pekerjaan ini.</span>
+          <button type="button" class="btn-reload-remote" onclick="forceReloadCurrentDetail()">Muat Versi Terbaru</button>
+        `;
+        detailPanel.insertBefore(banner, detailPanel.firstChild);
+      }
+    }
+    return banner;
+  }
+
+  async function forceReloadCurrentDetail() {
+    if (!activeProjectId) return;
+    const banner = document.getElementById("remoteUpdateBanner");
+    if (banner) banner.style.display = "none";
+    await openCardDetail(activeProjectId, true);
+  }
+
+  // Real-time Background Polling (Tiap 8 detik & saat tab kembali aktif)
+  async function syncBoardNow(isInitial = false) {
+    if (isSyncing) return;
+    if (!isInitial && document.hidden) return;
+
+    isSyncing = true;
+    try {
+      const res = await fetch("/api/board-sync", { cache: "no-store" });
+      const data = await res.json();
+      if (data.status !== "ok") return;
+
+      // 1. Cek perubahan daftar project card
+      const incomingProjects = data.projects || [];
+      const projectsChanged = JSON.stringify(incomingProjects) !== JSON.stringify(allProjects);
+      if (projectsChanged) {
+        allProjects = incomingProjects;
+        if (!activeProjectId) {
+          renderCards();
+        } else {
+          const latestProj = allProjects.find(p => p.project_id === activeProjectId);
+          if (!latestProj) {
+            alert("Pekerjaan ini telah dihapus oleh rekan tim.");
+            goBackBoard(true);
+          } else {
+            const newFp = getProjectFingerprint(latestProj);
+            if (activeProjectFingerprint && newFp !== activeProjectFingerprint) {
+              activeProjectFingerprint = newFp;
+              if (!isDirty) {
+                await openCardDetail(activeProjectId, true);
+              } else {
+                const banner = ensureRemoteBanner();
+                if (banner) banner.style.display = "flex";
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Cek notifikasi baru
+      const incomingNotifs = data.notifications || [];
+      const unreadCount = data.unread_count || 0;
+      const maxId = incomingNotifs.reduce((m, n) => Math.max(m, Number(n.notif_id || 0)), 0);
+
+      if (isInitial) {
+        lastKnownNotifId = maxId;
+      } else if (maxId > lastKnownNotifId) {
+        const brandNewNotifs = incomingNotifs.filter(
+          n => !n.is_read && Number(n.notif_id) > lastKnownNotifId
+        );
+        lastKnownNotifId = maxId;
+        brandNewNotifs.reverse().forEach(n => showLiveToast(n));
+      }
+
+      if (isInitial || JSON.stringify(incomingNotifs) !== JSON.stringify(userNotifications)) {
+        userNotifications = incomingNotifs;
+        renderNotifications(unreadCount);
+      }
+    } catch (e) {
+      // Abaikan gangguan jaringan sementara agar tidak mengganggu user
+    } finally {
+      isSyncing = false;
+    }
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) {
+      syncBoardNow(false);
+    }
+  });
 
   // Shortcut Ctrl + K untuk fokus ke Global Search
   document.addEventListener("keydown", function (e) {
@@ -1155,24 +1367,13 @@
     const willOpen = menu.style.display !== "block";
     menu.style.display = willOpen ? "block" : "none";
     if (willOpen) {
-      loadNotifications();
-    }
-  }
-
-  async function loadNotifications() {
-    try {
-      const res = await fetch("/api/notifications");
-      const data = await res.json();
-      if (data.status === "ok") {
-        userNotifications = data.notifications || [];
-        renderNotifications(data.unread_count || 0);
-      }
-    } catch (e) {
-      // Abaikan jika gagal polling sementara
+      syncBoardNow(false);
     }
   }
 
   function renderNotifications(unreadCount) {
+    document.title = unreadCount > 0 ? `(${unreadCount}) ${BASE_PAGE_TITLE}` : BASE_PAGE_TITLE;
+
     const badge = document.getElementById("notifUnreadBadge");
     if (badge) {
       if (unreadCount > 0) {
@@ -1210,7 +1411,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notif_id: notifId }),
       });
-      await loadNotifications();
+      await syncBoardNow(false);
     } catch (e) {}
 
     if (projectId) {
@@ -1225,7 +1426,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      await loadNotifications();
+      await syncBoardNow(false);
     } catch (e) {}
   }
 
@@ -1289,8 +1490,8 @@
 
   async function initPage() {
     await loadUsers();
-    await loadProjects();
-    await loadNotifications();
+    await syncBoardNow(true);
+    setInterval(() => syncBoardNow(false), 8000);
   }
 
   async function loadUsers() {
@@ -1301,15 +1502,6 @@
       const sel = document.getElementById("assigneeFilter");
       sel.innerHTML = `<option value="ALL">👤 Semua PIC</option>` +
         masterUsers.map(u => `<option value="${u.user_id}">${escapeHtml(u.nama_lengkap)}</option>`).join("");
-    }
-  }
-
-  async function loadProjects() {
-    const res = await fetch("/api/projects");
-    const data = await res.json();
-    if (data.status === "ok") {
-      allProjects = data.projects;
-      renderCards();
     }
   }
 
@@ -1406,8 +1598,7 @@
       const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE" });
       const data = await res.json();
       if (data.status === "ok") {
-        await loadProjects();
-        await loadNotifications();
+        await syncBoardNow(false);
       } else {
         alert("Gagal menghapus pekerjaan: " + (data.message || "Terjadi kesalahan"));
         btn.disabled = false;
@@ -1434,8 +1625,7 @@
       const data = await res.json();
       if (data.status === "ok") {
         isDirty = false;
-        goBackBoard();
-        await loadNotifications();
+        goBackBoard(true);
       } else {
         alert("Gagal menghapus pekerjaan: " + (data.message || "Terjadi kesalahan"));
       }
@@ -1449,11 +1639,20 @@
     return JSON.parse(JSON.stringify(obj));
   }
 
-  async function openCardDetail(projectId) {
+  async function openCardDetail(projectId, silent = false) {
     activeProjectId = projectId;
-    const res = await fetch(`/api/projects/${projectId}`);
+    const cardSnapshot = allProjects.find(x => x.project_id === projectId);
+    activeProjectFingerprint = getProjectFingerprint(cardSnapshot);
+
+    const res = await fetch(`/api/projects/${projectId}`, { cache: "no-store" });
     const data = await res.json();
-    if (data.status !== "ok") return alert(data.message);
+    if (data.status !== "ok") {
+      if (!silent) alert(data.message);
+      return;
+    }
+
+    const banner = document.getElementById("remoteUpdateBanner");
+    if (banner) banner.style.display = "none";
 
     const p = data.project;
     originalDetailState = {
@@ -1490,7 +1689,7 @@
     cancelAddTaskForm();
     renderDetailDraft();
     renderFileGrid();
-    setDirty(false, "Semua perubahan sudah tersimpan.");
+    setDirty(false, silent ? "🔄 Diperbarui otomatis dari rekan tim." : "Semua perubahan sudah tersimpan.");
   }
 
   function setDirty(dirtyFlag, customMsg) {
@@ -1503,7 +1702,7 @@
       ind.className = "dirty-indicator unsaved";
       ind.innerText = customMsg || "⚠️ Ada perubahan yang belum disimpan.";
     } else {
-      ind.className = "dirty-indicator" + (customMsg && customMsg.includes("berhasil") ? " saved" : "");
+      ind.className = "dirty-indicator" + (customMsg && (customMsg.includes("berhasil") || customMsg.includes("otomatis")) ? " saved" : "");
       ind.innerText = customMsg || "Semua perubahan sudah tersimpan.";
     }
   }
@@ -1762,8 +1961,8 @@
       });
       const data = await res.json();
       if (data.status === "ok") {
+        await syncBoardNow(false);
         await openCardDetail(activeProjectId);
-        await loadNotifications();
         setDirty(false, "✅ Semua perubahan & file berhasil disimpan!");
       } else {
         alert("Gagal menyimpan: " + (data.message || "Terjadi kesalahan"));
@@ -1774,20 +1973,25 @@
     }
   }
 
-  function goBackBoard() {
-    if (isDirty) {
+  function goBackBoard(force = false) {
+    if (!force && isDirty) {
       const ok = confirm("Ada perubahan atau file yang belum disimpan. Yakin mau kembali tanpa menyimpan?");
       if (!ok) return;
     }
     activeProjectId = null;
+    activeProjectFingerprint = "";
     stagedFiles = [];
     isDirty = false;
+    const banner = document.getElementById("remoteUpdateBanner");
+    if (banner) banner.style.display = "none";
+
     document.getElementById("cardDetailView").style.display = "none";
     document.getElementById("cardGrid").style.display = "grid";
     document.getElementById("filterBar").style.display = "flex";
     document.getElementById("btnBackBoard").disabled = true;
     document.getElementById("addressBar").innerHTML = `<span>📋 Workspace</span> <span>›</span> <strong>Semua Pekerjaan & Project</strong>`;
-    loadProjects();
+    renderCards();
+    syncBoardNow(false);
   }
 
   // --- Modal Buat Card Baru ---
@@ -1871,8 +2075,7 @@
       if (data.status === "ok") {
         setCreateModalLoading(false);
         closeCreateModal();
-        await loadProjects();
-        await loadNotifications();
+        await syncBoardNow(false);
       } else {
         alert(data.message || "Gagal membuat card pekerjaan.");
       }

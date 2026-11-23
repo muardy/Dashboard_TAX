@@ -708,3 +708,71 @@ def api_mark_notifications_read():
         return jsonify({"status": "error", "message": str(e)}), 500
     finally:
         conn.close()
+
+# ==========================================
+# 11. API REAL-TIME BOARD & NOTIF SYNC
+# ==========================================
+@project_bp.route("/api/board-sync", methods=["GET"])
+def api_board_sync():
+    conn = _get_db()
+    try:
+        with conn.cursor() as cur:
+            _ensure_notif_table(cur)
+            uid, _ = _get_current_user_info(cur)
+
+            cur.execute("""
+                SELECT p.*,
+                       (SELECT COUNT(*) FROM project_files f WHERE f.project_id = p.project_id) AS file_count,
+                       (SELECT COUNT(*) FROM project_tasks t WHERE t.project_id = p.project_id) AS task_total,
+                       (SELECT COUNT(*) FROM project_tasks t WHERE t.project_id = p.project_id AND t.is_done) AS task_done,
+                       COALESCE(
+                           (SELECT json_agg(
+                               json_build_object('user_id', u.user_id, 'nama_lengkap', u.nama_lengkap)
+                               ORDER BY u.nama_lengkap ASC
+                           )
+                           FROM project_assignees pa
+                           JOIN master_user u ON u.user_id = pa.user_id
+                           WHERE pa.project_id = p.project_id),
+                           '[]'::json
+                       ) AS assignees
+                FROM projects p
+                ORDER BY
+                    CASE p.status WHEN 'ON_PROGRESS' THEN 1 WHEN 'IDLE' THEN 2 ELSE 3 END,
+                    p.updated_at DESC
+            """)
+            projects = cur.fetchall()
+            for r in projects:
+                if r.get("updated_at"):
+                    r["updated_at"] = r["updated_at"].strftime("%d/%m/%Y %H:%M")
+
+            notifications = []
+            unread_count = 0
+            if uid:
+                cur.execute(
+                    """
+                    SELECT n.notif_id, n.project_id, n.actor_name, n.message, n.is_read,
+                           TO_CHAR(n.created_at, 'DD Mon YYYY, HH24:MI') AS created_at,
+                           p.nama_project
+                    FROM user_notifications n
+                    LEFT JOIN projects p ON p.project_id = n.project_id
+                    WHERE n.user_id = %s
+                    ORDER BY n.created_at DESC
+                    LIMIT 25
+                    """,
+                    (uid,),
+                )
+                notifications = cur.fetchall()
+                unread_count = sum(1 for r in notifications if not r["is_read"])
+
+        conn.commit()
+        return jsonify({
+            "status": "ok",
+            "projects": projects,
+            "notifications": notifications,
+            "unread_count": unread_count,
+        })
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    finally:
+        conn.close()
