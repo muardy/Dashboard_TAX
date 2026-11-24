@@ -20,7 +20,7 @@
         }
         * { box-sizing: border-box; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
         body { background: var(--bg); color: var(--text); margin: 0; padding: 24px; }
-        .container { max-width: 1180px; margin: 0 auto; }
+        .container { max-width: 1260px; margin: 0 auto; }
         .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
         .back-link { text-decoration: none; color: var(--primary); font-weight: 600; font-size: 14px; }
         .back-link:hover { text-decoration: underline; }
@@ -91,7 +91,7 @@
         }
         .search-input {
             padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 7px;
-            font-size: 13.5px; min-width: 260px;
+            font-size: 13.5px; min-width: 280px;
         }
         .filter-group { display: flex; gap: 6px; }
         .filter-btn {
@@ -99,19 +99,20 @@
             background: #fff; font-size: 13px; cursor: pointer; font-weight: 500;
         }
         .filter-btn.active { background: #eff6ff; border-color: var(--primary); color: var(--primary); font-weight: 600; }
-        .table-wrap { overflow-x: auto; max-height: 540px; border: 1px solid var(--border); border-radius: 8px; }
+        .table-wrap { overflow-x: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 8px; }
         table { width: 100%; border-collapse: collapse; font-size: 13px; }
         thead th {
             position: sticky; top: 0; background: #1e3a8a; color: #fff;
-            padding: 10px 12px; text-align: left; font-weight: 600; z-index: 2;
+            padding: 10px 10px; text-align: left; font-weight: 600; z-index: 2;
         }
-        tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+        tbody td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; }
         tbody tr:nth-child(even) { background: #f8fafc; }
         .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-        .cat-select {
+        .cell-input {
             padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 5px;
             font-size: 12.5px; background: #fff; width: 100%;
         }
+        .cell-input:focus { outline: none; border-color: var(--primary); }
         .loader { display: none; margin-top: 14px; font-size: 13.5px; color: var(--primary); font-weight: 600; }
     </style>
 </head>
@@ -119,13 +120,13 @@
 <div class="container">
     <div class="topbar">
         <a href="/dashboard" class="back-link">← Kembali ke Dashboard</a>
-        <span style="font-size: 12.5px; color: var(--muted);">Auto-Rekonsiliasi Saldo &amp; Ekualisasi SPT</span>
+        <span style="font-size: 12.5px; color: var(--muted);">Format Standar Buku Bank (DEBIT / KREDIT / SALDO)</span>
     </div>
 
     <div class="card">
         <h2>Konverter Rekening Koran ke Buku Bank (.xlsx)</h2>
         <p class="subtitle">
-            Upload e-Statement PDF dari bank mana pun di Indonesia. Sistem otomatis mendeteksi bank, memisahkan mutasi masuk/keluar, mengategorikan transaksi, dan menghitung saldo berjalan berumus Excel.
+            Upload e-Statement PDF. Sistem otomatis merapikan REMARK menjadi 1 baris, memisahkan berita transfer ke KETERANGAN, menempatkan mutasi masuk ke DEBIT &amp; mutasi keluar ke KREDIT, serta membuat rumus SALDO berjalan.
         </p>
 
         <div class="bank-badges">
@@ -174,11 +175,11 @@
                 <div class="stat-value" id="statSaldoAwal">Rp 0</div>
             </div>
             <div class="stat-box">
-                <div class="stat-label">Total Mutasi Masuk (Kredit)</div>
+                <div class="stat-label">Total DEBIT (Uang Masuk)</div>
                 <div class="stat-value text-in" id="statTotalMasuk">Rp 0</div>
             </div>
             <div class="stat-box">
-                <div class="stat-label">Total Mutasi Keluar (Debet)</div>
+                <div class="stat-label">Total KREDIT (Uang Keluar)</div>
                 <div class="stat-value text-out" id="statTotalKeluar">Rp 0</div>
             </div>
             <div class="stat-box">
@@ -191,24 +192,24 @@
         <div class="toolbar">
             <div class="filter-group">
                 <button class="filter-btn active" data-filter="ALL">Semua (<span id="cntAll">0</span>)</button>
-                <button class="filter-btn" data-filter="IN">Mutasi Masuk (<span id="cntIn">0</span>)</button>
-                <button class="filter-btn" data-filter="OUT">Mutasi Keluar (<span id="cntOut">0</span>)</button>
+                <button class="filter-btn" data-filter="IN">DEBIT / Masuk (<span id="cntIn">0</span>)</button>
+                <button class="filter-btn" data-filter="OUT">KREDIT / Keluar (<span id="cntOut">0</span>)</button>
             </div>
-            <input type="text" id="searchInput" class="search-input" placeholder="Cari keterangan atau lawan transaksi...">
+            <input type="text" id="searchInput" class="search-input" placeholder="Cari remark atau keterangan...">
         </div>
 
         <div class="table-wrap">
             <table>
                 <thead>
                     <tr>
-                        <th style="width: 48px;">No</th>
-                        <th style="width: 105px;">Tanggal</th>
-                        <th>Keterangan / Uraian</th>
-                        <th style="width: 190px;">Lawan Transaksi</th>
-                        <th style="width: 220px;">Kategori Akun (Bisa Diedit)</th>
-                        <th class="num" style="width: 145px;">Masuk (Rp)</th>
-                        <th class="num" style="width: 145px;">Keluar (Rp)</th>
-                        <th class="num" style="width: 155px;">Saldo (Rp)</th>
+                        <th style="width: 45px;">No</th>
+                        <th style="width: 75px;">TGL</th>
+                        <th>REMARK</th>
+                        <th style="width: 110px;">ACC NO.</th>
+                        <th class="num" style="width: 145px;">DEBIT</th>
+                        <th class="num" style="width: 145px;">KREDIT</th>
+                        <th class="num" style="width: 155px;">SALDO</th>
+                        <th style="width: 240px;">KETERANGAN</th>
                     </tr>
                 </thead>
                 <tbody id="txTableBody"></tbody>
@@ -218,21 +219,6 @@
 </div>
 
 <script>
-    const CATEGORIES = [
-        "Penerimaan Transfer / Usaha",
-        "Pengeluaran Transfer / Operasional",
-        "Setoran Tunai",
-        "Tarik Tunai ATM",
-        "Pembayaran QRIS / EDC",
-        "Pembayaran Virtual Account / Tagihan",
-        "Beban Gaji / Payroll",
-        "Biaya Administrasi Bank",
-        "Pendapatan Bunga / Bagi Hasil",
-        "Pajak Bunga Bank (PPh Final)",
-        "Setoran Modal / Prive",
-        "Lain-lain"
-    ];
-
     let parsedData = null;
     let currentFilter = "ALL";
 
@@ -245,7 +231,14 @@
     const errorBox = document.getElementById("errorBox");
     const resultSection = document.getElementById("resultSection");
 
-    const formatRp = (val) => "Rp " + Number(val || 0).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formatNum = (val) => Number(val || 0).toLocaleString("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const formatRp = (val) => "Rp " + formatNum(val);
+
+    function formatShortDate(isoStr) {
+        if (!isoStr || !isoStr.includes("-")) return isoStr || "-";
+        const parts = isoStr.split("-");
+        return parts.length === 3 ? `${parts[2]}/${parts[1]}` : isoStr;
+    }
 
     dropzone.addEventListener("click", () => pdfInput.click());
     dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
@@ -306,9 +299,9 @@
         const { meta, transactions } = parsedData;
         resultSection.style.display = "block";
 
-        document.getElementById("resBankTitle").textContent = `${meta.bank} — Buku Bank`;
+        document.getElementById("resBankTitle").textContent = `${meta.nama_pemilik} — BUKU BANK PERIODE ${meta.periode}`;
         document.getElementById("resAccountInfo").textContent =
-            `No. Rek: ${meta.no_rekening} | Pemilik: ${meta.nama_pemilik} | Periode: ${meta.periode}`;
+            `Bank: ${meta.bank} | No. Rek: ${meta.no_rekening} | Total Transaksi: ${transactions.length}`;
 
         document.getElementById("statSaldoAwal").textContent = formatRp(meta.saldo_awal);
         document.getElementById("statTotalMasuk").textContent = formatRp(meta.total_masuk);
@@ -329,6 +322,10 @@
         renderTable();
     }
 
+    function escapeAttr(str) {
+        return String(str || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+
     function renderTable() {
         const keyword = document.getElementById("searchInput").value.toLowerCase();
         const tbody = document.getElementById("txTableBody");
@@ -338,7 +335,7 @@
             if (currentFilter === "IN" && tx.masuk <= 0) return false;
             if (currentFilter === "OUT" && tx.keluar <= 0) return false;
             if (keyword) {
-                const hay = `${tx.keterangan} ${tx.lawan_transaksi} ${tx.kategori}`.toLowerCase();
+                const hay = `${tx.remark || ""} ${tx.catatan || ""} ${tx.acc_no || ""}`.toLowerCase();
                 if (!hay.includes(keyword)) return false;
             }
             return true;
@@ -346,29 +343,25 @@
 
         filtered.forEach((tx) => {
             const tr = document.createElement("tr");
-            const optionsHtml = CATEGORIES.map(c =>
-                `<option value="${c}" ${c === tx.kategori ? "selected" : ""}>${c}</option>`
-            ).join("");
-
             tr.innerHTML = `
                 <td>${tx.no}</td>
-                <td style="white-space:nowrap;">${tx.tanggal}</td>
-                <td style="white-space:pre-line;">${tx.keterangan}</td>
-                <td>${tx.lawan_transaksi}</td>
-                <td><select class="cat-select" data-no="${tx.no}">${optionsHtml}</select></td>
-                <td class="num text-in">${tx.masuk > 0 ? formatRp(tx.masuk) : "-"}</td>
-                <td class="num text-out">${tx.keluar > 0 ? formatRp(tx.keluar) : "-"}</td>
-                <td class="num" style="font-weight:600;">${formatRp(tx.saldo)}</td>
+                <td style="white-space:nowrap; text-align:center;">${formatShortDate(tx.tanggal)}</td>
+                <td><input type="text" class="cell-input edit-field" data-no="${tx.no}" data-field="remark" value="${escapeAttr(tx.remark)}"></td>
+                <td><input type="text" class="cell-input edit-field" data-no="${tx.no}" data-field="acc_no" value="${escapeAttr(tx.acc_no)}" placeholder="-"></td>
+                <td class="num text-in">${tx.masuk > 0 ? formatNum(tx.masuk) : ""}</td>
+                <td class="num text-out">${tx.keluar > 0 ? formatNum(tx.keluar) : ""}</td>
+                <td class="num" style="font-weight:600;">${formatNum(tx.saldo)}</td>
+                <td><input type="text" class="cell-input edit-field" data-no="${tx.no}" data-field="catatan" value="${escapeAttr(tx.catatan)}" placeholder="Catatan..."></td>
             `;
             tbody.appendChild(tr);
         });
 
-        // Simpan perubahan kategori langsung ke state parsedData
-        tbody.querySelectorAll(".cat-select").forEach(sel => {
-            sel.addEventListener("change", (e) => {
+        tbody.querySelectorAll(".edit-field").forEach(inp => {
+            inp.addEventListener("input", (e) => {
                 const rowNo = Number(e.target.dataset.no);
+                const field = e.target.dataset.field;
                 const item = parsedData.transactions.find(t => t.no === rowNo);
-                if (item) item.kategori = e.target.value;
+                if (item) item[field] = e.target.value;
             });
         });
     }
@@ -401,9 +394,10 @@
             const blob = await res.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
-            const safeRek = (parsedData.meta.no_rekening || "Rekening").replace(/[^a-zA-Z0-9]/g, "_");
+            const safeName = (parsedData.meta.nama_pemilik || parsedData.meta.no_rekening || "Buku_Bank")
+                .replace(/[^a-zA-Z0-9]/g, "_");
             a.href = url;
-            a.download = `Buku_Bank_${safeRek}.xlsx`;
+            a.download = `BUKU_BANK_${safeName}.xlsx`;
             document.body.appendChild(a);
             a.click();
             a.remove();

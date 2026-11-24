@@ -1,6 +1,6 @@
 import io
 import re
-from datetime import datetime
+from datetime import datetime, date
 import pdfplumber
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -46,8 +46,10 @@ def detect_bank_code(full_text_upper: str) -> str:
     for code, keywords in BANK_SIGNATURES:
         if any(kw in full_text_upper for kw in keywords):
             return code
-    # Cek BPD (Bank Pembangunan Daerah)
-    bpd_match = re.search(r"\b(BANK\s+(?:DKI|BJB|JATENG|JATIM|SUMUT|NAGARI|RIAU|SUMSEL|KALTIM|SULSELBAR|BALI|NTB|NTT|PAPUA))\b", full_text_upper)
+    bpd_match = re.search(
+        r"\b(BANK\s+(?:DKI|BJB|JATENG|JATIM|SUMUT|NAGARI|RIAU|SUMSEL|KALTIM|SULSELBAR|BALI|NTB|NTT|PAPUA))\b",
+        full_text_upper,
+    )
     if bpd_match:
         return bpd_match.group(1)
     return "UNIVERSAL"
@@ -70,38 +72,140 @@ def parse_id_amount(raw_str: str) -> float:
 def normalize_date_str(raw_date: str, default_year: int) -> str | None:
     """Konversi berbagai format tanggal bank Indonesia ke ISO YYYY-MM-DD."""
     s = raw_date.strip().upper()
-    # 1. DD/MM/YYYY atau DD-MM-YYYY atau DD.MM.YYYY
     m = re.search(r"\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})\b", s)
     if m:
         dd, mm, yyyy = m.groups()
         return f"{yyyy}-{mm.zfill(2)}-{dd.zfill(2)}"
 
-    # 2. YYYY-MM-DD atau YYYY/MM/DD
     m = re.search(r"\b(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})\b", s)
     if m:
         yyyy, mm, dd = m.groups()
         return f"{yyyy}-{mm.zfill(2)}-{dd.zfill(2)}"
 
-    # 3. DD/MM/YY atau DD-MM-YY
     m = re.search(r"\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2})\b", s)
     if m:
         dd, mm, yy = m.groups()
         return f"20{yy}-{mm.zfill(2)}-{dd.zfill(2)}"
 
-    # 4. DD MMM YYYY atau DD-MMM-YYYY (misal: 14 Feb 2026)
     m = re.search(r"\b(\d{1,2})[\s\-/]([A-Z]{3,9})[\s\-/](\d{2,4})\b", s)
     if m and m.group(2) in MONTH_NAMES:
         dd, mon_str, yr = m.groups()
         yyyy = yr if len(yr) == 4 else f"20{yr}"
         return f"{yyyy}-{MONTH_NAMES[mon_str]}-{dd.zfill(2)}"
 
-    # 5. DD/MM saja (khas BCA)
     m = re.match(r"^(\d{2})/(\d{2})$", s)
     if m:
         dd, mm = m.groups()
         return f"{default_year}-{mm}-{dd}"
 
     return None
+
+
+def to_excel_date(iso_str: str):
+    """Konversi YYYY-MM-DD ke objek datetime.date agar format dd/mm di Excel aktif."""
+    try:
+        parts = [int(p) for p in str(iso_str).split("-")]
+        if len(parts) == 3:
+            return date(parts[0], parts[1], parts[2])
+    except Exception:
+        pass
+    return iso_str
+
+
+def format_remark_and_note(ket_lines: list[str], masuk: float, keluar: float) -> tuple[str, str]:
+    """
+    Menyederhanakan keterangan mutasi bank menjadi:
+    1) REMARK 1 baris standar Buku Bank (misal: 'TRANSFER E-BANKING SURYA', 'TRANSFER E-BANKING KE SRI ZULISTIANA')
+    2) KETERANGAN / catatan berita transfer (misal: 'Belanja oli')
+    """
+    raw = [ln.strip() for ln in ket_lines if ln and ln.strip()]
+    if not raw:
+        return "-", ""
+
+    first = raw[0].upper()
+    is_db = keluar > 0 and masuk == 0
+
+    # 1. Pola khusus BCA
+    if first.startswith("BIAYA ADM"):
+        return "BIAYA ADMIN", ""
+    if first == "BUNGA":
+        return "BUNGA", ""
+    if first.startswith("PAJAK BUNGA"):
+        return "PAJAK BUNGA", ""
+    if first.startswith("DB OTOMATIS"):
+        return "DB OTOMATIS AUTO DEBIT", ""
+    if first.startswith("SETORAN TUNAI"):
+        depositor = " ".join(ln for ln in raw[1:] if not re.match(r"^\d+$", ln))
+        return "SETORAN TUNAI", depositor
+
+    if first.startswith("SWITCHING"):
+        prefix = "SWITCHING KE" if is_db else "SWITCHING"
+        names = [
+            ln for ln in raw[1:]
+            if not re.match(r"^(DR|CR)\s*\d+$", ln, re.I)
+            and not ln.startswith("/")
+        ]
+        return f"{prefix} {' '.join(names).strip()}".strip(), ""
+
+    if first.startswith("BI-FAST"):
+        prefix = "BI-FAST KE" if is_db else "BI-FAST"
+        filtered = [
+            ln for ln in raw[1:]
+            if not re.match(r"^BIF TRANSFER\s+(DR|KE)$", ln, re.I)
+            and not re.match(r"^\d{3}$", ln)
+            and not re.match(r"^TANGGAL\s*:", ln, re.I)
+        ]
+        joined_u = " ".join(filtered).upper()
+        if "DOMPET ANAK BANGSA" in joined_u:
+            return f"{prefix} GOPAY DOMPET ANAK BANGSA", ""
+        if "AIRPAY INTERNATION" in joined_u:
+            return f"{prefix} SHOPEEPAY", ""
+        if len(filtered) >= 2:
+            counterparty = filtered[-1]
+            note = " ".join(filtered[:-1]).strip()
+            if note and len(note) > 2:
+                note = note[0].upper() + note[1:]
+            return f"{prefix} {counterparty}".strip(), note
+        elif len(filtered) == 1:
+            return f"{prefix} {filtered[0]}".strip(), ""
+        return prefix, ""
+
+    if first.startswith("TRSF E-BANKING"):
+        prefix = "TRANSFER E-BANKING KE" if is_db else "TRANSFER E-BANKING"
+        filtered = []
+        for ln in raw[1:]:
+            if re.match(r"^\d{4}/[A-Z0-9]+/[A-Z0-9]+$", ln, re.I):
+                continue
+            if re.match(r"^[\d,]+\.\d{2}$", ln):
+                continue
+            if re.match(r"^TANGGAL\s*:", ln, re.I):
+                continue
+            if re.match(
+                r"^(RW\s*\d+|RT\s*\d+|V\s+NO\s+\d+A|JL\s+KEBON|TAMAN\s+SARI|MAPHAR|JAKARTA\s+\d+|INDONESIA)$",
+                ln,
+                re.I,
+            ):
+                continue
+            filtered.append(ln)
+
+        joined_u = " ".join(filtered).upper()
+        if "AIRPAY INTERNATION" in joined_u:
+            return f"{prefix} SHOPEEPAY", ""
+        if "DOMPET ANAK BANGSA" in joined_u:
+            return f"{prefix} GOPAY DOMPET ANAK BANGSA", ""
+        if len(filtered) >= 2:
+            counterparty = filtered[-1]
+            note = " ".join(filtered[:-1]).strip()
+            if note and len(note) > 2:
+                note = note[0].upper() + note[1:]
+            return f"{prefix} {counterparty}".strip(), note
+        elif len(filtered) == 1:
+            return f"{prefix} {filtered[0]}".strip(), ""
+        return prefix, ""
+
+    # 2. Pola bank umum (BRI, Mandiri, BNI, dll.)
+    single_line = re.sub(r"\s+", " ", " ".join(raw)).strip()
+    return single_line, ""
 
 
 def auto_categorize(desc: str, masuk: float, keluar: float) -> tuple[str, str]:
@@ -121,7 +225,7 @@ def auto_categorize(desc: str, masuk: float, keluar: float) -> tuple[str, str]:
         return "Pendapatan Bunga / Bagi Hasil", "Bank"
     if any(k in upper for k in ["PAJAK BUNGA", "PPH BUNGA", "TAX"]):
         return "Pajak Bunga Bank (PPh Final)", "Negara / Bank"
-    if "SETORAN VIA CDM" in upper or "SETOR TUNAI" in upper or "CASH DEPOSIT" in upper:
+    if "SETORAN VIA CDM" in upper or "SETOR TUNAI" in upper or "SETORAN TUNAI" in upper or "CASH DEPOSIT" in upper:
         return "Setoran Tunai", counterparty
     if any(k in upper for k in ["TARIKAN ATM", "PENARIKAN TUNAI", "CASH WITHDRAWAL"]):
         return "Tarik Tunai ATM", "Kas Tunai"
@@ -146,16 +250,16 @@ def extract_generic_metadata(first_text: str, bank_label: str) -> dict:
         "saldo_awal": 0.0,
         "saldo_akhir_pdf": 0.0,
     }
-    # Cari Nomor Rekening (10 - 16 digit)
     rek_m = re.search(
-        r"(?:NO\.?\s*REKENING|ACCOUNT\s*NO\.?|NOMOR\s*REKENING|REKENING)\s*[:\-]?\s*(\d{10,16})",
+        r"(?:NO\.?\s*REKENING|ACCOUNT\s*NO\.?|NOMOR\s*REKENING|REKENING)\s*[:\-]?\s*([\d\s]{10,20})",
         first_text,
         re.IGNORECASE,
     )
     if rek_m:
-        meta["no_rekening"] = rek_m.group(1)
+        digits = re.sub(r"\s+", "", rek_m.group(1))
+        if len(digits) >= 10:
+            meta["no_rekening"] = digits
 
-    # Cari Periode
     per_m = re.search(
         r"(?:PERIODE|PERIOD)\s*[:\-]?\s*([A-Z0-9\s/\-\.]{6,35})",
         first_text,
@@ -164,7 +268,6 @@ def extract_generic_metadata(first_text: str, bank_label: str) -> dict:
     if per_m:
         meta["periode"] = per_m.group(1).splitlines()[0].strip()
 
-    # Cari Nama Pemilik
     name_m = re.search(
         r"(?:NAMA\s*PEMILIK|NAMA\s*NASABAH|ACCOUNT\s*NAME|KEPADA\s*YTH\.?(?:\s*/\s*TO)?)\s*[:\-]?\s*\n?\s*([A-Z][A-Z\s.,']{3,45})",
         first_text,
@@ -191,7 +294,8 @@ def parse_bca_pdf(pdf_bytes: bytes) -> dict:
 
         lines_p1 = first_text.splitlines()
         for idx, line in enumerate(lines_p1):
-            if ("KCP " in line or "KCU " in line) and idx + 1 < len(lines_p1):
+            compact_l = re.sub(r"\s+", "", line).upper()
+            if ("KCP" in compact_l or "KCU" in compact_l) and idx + 1 < len(lines_p1):
                 meta["nama_pemilik"] = lines_p1[idx + 1].strip()
                 break
 
@@ -205,26 +309,29 @@ def parse_bca_pdf(pdf_bytes: bytes) -> dict:
                 y_key = round(w["top"] / 4) * 4
                 rows_by_y.setdefault(y_key, []).append(w)
 
+            in_table = False
             for y_key in sorted(rows_by_y.keys()):
                 row_words = sorted(rows_by_y[y_key], key=lambda item: item["x0"])
                 line_text = " ".join(w["text"] for w in row_words)
+                compact = re.sub(r"\s+", "", line_text).upper()
 
-                if any(skip in line_text for skip in [
-                    "GRUP BCA", "REKENING TAHAPAN", "NO. REKENING", "HALAMAN",
-                    "PERIODE", "MATA UANG", "CATATAN:", "Apabila nasabah",
-                    "telah menyetujui", "BCA berhak", "Laporan Mutasi",
-                    "TANGGAL KETERANGAN", "Bersambung ke halaman"
-                ]):
+                # Kunci area tabel: hanya baca baris di bawah header TANGGAL KETERANGAN SALDO
+                if "TANGGAL" in compact and "KETERANGAN" in compact and "SALDO" in compact:
+                    in_table = True
+                    continue
+                if not in_table:
                     continue
 
-                if line_text.startswith("SALDO AWAL :"):
+                if "BERSAMBUNGKEHALAMAN" in compact:
+                    break
+                if compact.startswith("SALDOAWAL:"):
                     meta["saldo_awal"] = parse_id_amount(line_text.split(":", 1)[1])
-                    continue
-                if line_text.startswith("SALDO AKHIR :"):
+                    break
+                if compact.startswith("SALDOAKHIR:"):
                     meta["saldo_akhir_pdf"] = parse_id_amount(line_text.split(":", 1)[1])
-                    continue
-                if line_text.startswith(("MUTASI CR", "MUTASI DB")):
-                    continue
+                    break
+                if compact.startswith(("MUTASICR", "MUTASIDB")):
+                    break
 
                 col_tgl = " ".join(w["text"] for w in row_words if w["x0"] < 85)
                 col_ket = " ".join(w["text"] for w in row_words if 85 <= w["x0"] < 310)
@@ -250,7 +357,7 @@ def parse_bca_pdf(pdf_bytes: bytes) -> dict:
                         "keluar": amt if is_db else 0.0,
                     }
                 elif current_tx:
-                    if col_ket and not re.match(r"^\d+\.\d{2}$", col_ket.strip()):
+                    if col_ket:
                         current_tx["keterangan_lines"].append(col_ket)
 
         if current_tx:
@@ -285,12 +392,13 @@ def parse_bri_pdf(pdf_bytes: bytes) -> dict:
         if name_m:
             meta["nama_pemilik"] = clean_bri_text(name_m.group(1))
 
-        # Ambil Saldo Awal & Saldo Akhir dari ringkasan halaman terakhir
         last_words = [
             w for w in pdf.pages[-1].extract_words(keep_blank_chars=False, y_tolerance=3)
             if w.get("upright", True)
         ]
-        last_text = clean_bri_text(" ".join(w["text"] for w in sorted(last_words, key=lambda x: (round(x["top"] / 4), x["x0"]))))
+        last_text = clean_bri_text(
+            " ".join(w["text"] for w in sorted(last_words, key=lambda x: (round(x["top"] / 4), x["x0"])))
+        )
         sum_m = re.search(
             r"([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+Terbilang",
             last_text,
@@ -302,7 +410,6 @@ def parse_bri_pdf(pdf_bytes: bytes) -> dict:
         transactions = []
 
         for page in pdf.pages:
-            # Filter kata tegak (buang watermark miring BRImo)
             words = [
                 w for w in page.extract_words(keep_blank_chars=False, y_tolerance=3)
                 if w.get("upright", True)
@@ -310,7 +417,6 @@ def parse_bri_pdf(pdf_bytes: bytes) -> dict:
             if not words:
                 continue
 
-            # Deteksi posisi Y & X header tabel
             y_header = 0.0
             y_footer = page.height
             col_x = {"uraian": 105.0, "teller": 315.0, "debet": 365.0, "kredit": 445.0, "saldo": 515.0}
@@ -342,10 +448,7 @@ def parse_bri_pdf(pdf_bytes: bytes) -> dict:
                 if y_header > 0 and any(k in line_u for k in ["UNIT KERJA", "BUSINESS UNIT", "SALDO AWAL", "OPENING BALANCE"]):
                     y_footer = min(y_footer, min(w["top"] for w in rw) - 2)
 
-            # Ambil kata di dalam area tabel transaksi
             body_words = [w for w in words if y_header < w["top"] < y_footer]
-
-            # Cari semua anchor tanggal DD/MM/YY di kolom paling kiri
             date_anchors = sorted(
                 [
                     w for w in body_words
@@ -358,21 +461,10 @@ def parse_bri_pdf(pdf_bytes: bytes) -> dict:
                 continue
 
             for idx, d_word in enumerate(date_anchors):
-                y_start = (
-                    y_header
-                    if idx == 0
-                    else (date_anchors[idx - 1]["top"] + d_word["top"]) / 2.0
-                )
-                y_end = (
-                    y_footer
-                    if idx == len(date_anchors) - 1
-                    else (d_word["top"] + date_anchors[idx + 1]["top"]) / 2.0
-                )
+                y_start = y_header if idx == 0 else (date_anchors[idx - 1]["top"] + d_word["top"]) / 2.0
+                y_end = y_footer if idx == len(date_anchors) - 1 else (d_word["top"] + date_anchors[idx + 1]["top"]) / 2.0
 
-                band_words = [
-                    w for w in body_words
-                    if y_start <= w["top"] < y_end
-                ]
+                band_words = [w for w in body_words if y_start <= w["top"] < y_end]
                 band_words.sort(key=lambda x: (round(x["top"] / 4), x["x0"]))
 
                 tgl_parts, desc_parts, deb_parts, kred_parts = [], [], [], []
@@ -427,7 +519,6 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
         year_m = re.search(r"\b(20\d{2})\b", first_text)
         default_year = int(year_m.group(1)) if year_m else datetime.now().year
 
-        # Deteksi Saldo Awal jika tertulis di halaman pertama
         sa_m = re.search(
             r"(?:SALDO\s*AWAL|OPENING\s*BALANCE|BEGINNING\s*BALANCE)\s*[:\-]?\s*(?:IDR|RP\.?)?\s*([\d.,]+)",
             first_text,
@@ -437,7 +528,7 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
             meta["saldo_awal"] = parse_id_amount(sa_m.group(1))
 
         transactions = []
-        col_bounds = None  # Menyimpan batas X kolom dinamis lintas halaman
+        col_bounds = None
 
         for page in pdf.pages:
             words = page.extract_words(keep_blank_chars=False, y_tolerance=3)
@@ -446,14 +537,15 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
                 y_key = round(w["top"] / 4) * 4
                 rows_by_y.setdefault(y_key, []).append(w)
 
-            sorted_ys = sorted(rows_by_y.keys())
-            for y_key in sorted_ys:
+            for y_key in sorted(rows_by_y.keys()):
                 row_words = sorted(rows_by_y[y_key], key=lambda item: item["x0"])
                 row_upper = " ".join(w["text"].upper() for w in row_words)
 
-                # Deteksi Header Tabel Secara Dinamis
                 has_date_hdr = any(k in row_upper for k in ["TANGGAL", "TGL", "DATE"])
-                has_amt_hdr = any(k in row_upper for k in ["DEBET", "DEBIT", "KREDIT", "CREDIT", "MUTASI", "NOMINAL", "SALDO", "BALANCE"])
+                has_amt_hdr = any(
+                    k in row_upper
+                    for k in ["DEBET", "DEBIT", "KREDIT", "CREDIT", "MUTASI", "NOMINAL", "SALDO", "BALANCE"]
+                )
                 if has_date_hdr and has_amt_hdr:
                     detected = {}
                     for w in row_words:
@@ -475,7 +567,6 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
                         col_bounds = detected
                     continue
 
-                # Cek Saldo Akhir di footer
                 sak_m = re.search(
                     r"(?:SALDO\s*AKHIR|CLOSING\s*BALANCE|ENDING\s*BALANCE)\s*[:\-]?\s*(?:IDR|RP\.?)?\s*([\d.,]+)",
                     row_upper,
@@ -487,7 +578,6 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
                 if not col_bounds:
                     continue
 
-                # Petakan kata ke kolom terdekat berdasarkan col_bounds
                 buckets = {"tgl": [], "ket": [], "deb": [], "kred": [], "mut": [], "sal": []}
                 sorted_cols = sorted(col_bounds.items(), key=lambda kv: kv[1])
 
@@ -528,7 +618,6 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
                         elif any(tag in mut_u for tag in ["CR", "CREDIT", "KREDIT", "+"]) or mut_u.endswith("K"):
                             masuk = amt
                         else:
-                            # Akan diverifikasi lewat selisih saldo berjalan
                             masuk = amt
 
                     saldo_cp = parse_id_amount(sal_str) if sal_str else None
@@ -538,14 +627,15 @@ def parse_universal_bank_pdf(pdf_bytes: bytes, bank_code: str) -> dict:
                         "masuk": masuk,
                         "keluar": keluar,
                         "saldo_cp": saldo_cp,
-                        "ambiguous_sign": bool(mut_str and not any(t in mut_str.upper() for t in ["DB", "CR", "+", "-", "D", "K"])),
+                        "ambiguous_sign": bool(
+                            mut_str and not any(t in mut_str.upper() for t in ["DB", "CR", "+", "-", "D", "K"])
+                        ),
                     })
                 elif transactions:
                     extra_ket = " ".join(buckets["ket"]).strip()
                     if extra_ket and not any(skip in extra_ket.upper() for skip in ["HALAMAN", "PAGE ", "BERSAMBUNG"]):
                         transactions[-1]["keterangan_lines"].append(extra_ket)
 
-        # Balance-Delta Self-Correction untuk bank kolom mutasi tunggal tanpa label DB/CR
         prev_bal = meta["saldo_awal"]
         for tx in transactions:
             cp = tx.get("saldo_cp")
@@ -566,11 +656,15 @@ def finalize_rows(meta: dict, raw_transactions: list[dict]) -> dict:
 
     for idx, tx in enumerate(raw_transactions, start=1):
         desc = "\n".join(tx["keterangan_lines"]).strip() or "-"
+        remark, catatan = format_remark_and_note(tx["keterangan_lines"], tx["masuk"], tx["keluar"])
         running_balance = round(running_balance + tx["masuk"] - tx["keluar"], 2)
         kategori, lawan = auto_categorize(desc, tx["masuk"], tx["keluar"])
         cleaned_rows.append({
             "no": idx,
             "tanggal": tx["tanggal"],
+            "remark": remark,
+            "acc_no": "",
+            "catatan": catatan,
             "keterangan": desc,
             "lawan_transaksi": lawan,
             "kategori": kategori,
@@ -604,7 +698,9 @@ def parse_statement_pdf(pdf_bytes: bytes) -> dict:
         sample_text = (pdf.pages[0].extract_text() or "").upper()
 
     if len(sample_text.strip()) < 30:
-        raise ValueError("PDF ini merupakan hasil scan gambar (tanpa layer teks). Gunakan e-Statement PDF asli dari internet/mobile banking.")
+        raise ValueError(
+            "PDF ini merupakan hasil scan gambar (tanpa layer teks). Gunakan e-Statement PDF asli dari internet/mobile banking."
+        )
 
     bank_code = detect_bank_code(sample_text)
     if bank_code == "BCA":
@@ -621,136 +717,194 @@ def parse_statement_pdf(pdf_bytes: bytes) -> dict:
 
 
 def build_buku_bank_excel(meta: dict, rows: list[dict]) -> io.BytesIO:
+    """
+    Membangun file Excel Buku Bank sesuai template standar:
+    Kolom B..H = TGL | REMARK | ACC NO. | DEBIT | KREDIT | SALDO | KETERANGAN
+    - DEBIT  = Mutasi Uang Masuk (CR)
+    - KREDIT = Mutasi Uang Keluar (DB)
+    - SALDO  = Rumus berjalan =G{r-1}+E{r}-F{r}
+    """
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Buku Bank"
 
-    navy_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-    sub_fill = PatternFill(start_color="EFF6FF", end_color="EFF6FF", fill_type="solid")
-    zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-    total_fill = PatternFill(start_color="DBEAFE", end_color="DBEAFE", fill_type="solid")
-
-    white_bold = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    title_font = Font(name="Calibri", size=14, bold=True, color="1E3A8A")
-    bold_font = Font(name="Calibri", size=10, bold=True)
-    reg_font = Font(name="Calibri", size=10)
-    thin_side = Side(style="thin", color="CBD5E1")
-    border_all = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+    thin = Side(style="thin", color="000000")
+    med = Side(style="medium", color="000000")
     num_fmt = "#,##0.00"
+    date_fmt = "dd/mm"
 
-    # Kop Identitas Rekening
-    ws["A1"] = f"BUKU BANK — {meta.get('bank', 'REKENING KORAN').upper()}"
-    ws["A1"].font = title_font
-    ws["A2"] = "No. Rekening"
-    ws["B2"] = meta.get("no_rekening", "-")
-    ws["A3"] = "Pemilik Rekening"
-    ws["B3"] = meta.get("nama_pemilik", "-")
-    ws["A4"] = "Periode"
-    ws["B4"] = meta.get("periode", "-")
+    owner_name = str(meta.get("nama_pemilik") or "BUKU BANK").strip().upper()
+    periode_str = str(meta.get("periode") or "").strip().upper()
 
-    # Blok Rekonsiliasi
-    ws["E2"] = "Saldo Awal (Rp)"
-    ws["F2"] = float(meta.get("saldo_awal", 0.0))
-    ws["F2"].number_format = num_fmt
+    # Baris 1: Nama Pemilik Rekening (Merge B1:H1)
+    ws.merge_cells("B1:H1")
+    ws["B1"] = owner_name
+    ws["B1"].font = Font(name="Calibri", size=24, bold=True)
+    ws["B1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 42
+    for col_idx in range(2, 9):
+        c = ws.cell(row=1, column=col_idx)
+        c.border = Border(
+            top=med,
+            bottom=thin,
+            left=med if col_idx == 2 else None,
+            right=med if col_idx == 8 else None,
+        )
 
-    ws["E3"] = "Saldo Akhir Rekening Koran (Rp)"
-    ws["F3"] = float(meta.get("saldo_akhir_pdf", 0.0))
-    ws["F3"].number_format = num_fmt
+    # Baris 2: Judul Periode (Merge B2:H2)
+    ws.merge_cells("B2:H2")
+    ws["B2"] = f"BUKU BANK PERIODE {periode_str}".strip()
+    ws["B2"].font = Font(name="Calibri", size=16, bold=True)
+    ws["B2"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[2].height = 24
+    for col_idx in range(2, 9):
+        c = ws.cell(row=2, column=col_idx)
+        c.border = Border(
+            top=thin,
+            bottom=thin,
+            left=med if col_idx == 2 else None,
+            right=med if col_idx == 8 else None,
+        )
 
-    last_data_row = max(8, 8 + len(rows))
-    ws["E4"] = "Status Rekonsiliasi"
-    ws["F4"] = f'=IF(ROUND(H{last_data_row}-F3,0)=0,"MATCH / VALID","CEK SELISIH")'
-    ws["F4"].font = Font(name="Calibri", size=10, bold=True, color="15803D")
+    # Baris 3: Header Kolom B3:H3
+    headers = ["TGL", "REMARK", "ACC NO.", "DEBIT", "KREDIT", "SALDO", "KETERANGAN"]
+    ws.row_dimensions[3].height = 19
+    for offset, h_text in enumerate(headers):
+        col_idx = 2 + offset
+        cell = ws.cell(row=3, column=col_idx, value=h_text)
+        cell.font = Font(name="Calibri", size=11, bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+        cell.border = Border(
+            top=thin,
+            bottom=med,
+            left=med if col_idx == 2 else thin,
+            right=med if col_idx == 8 else thin,
+        )
 
-    for r in range(2, 5):
-        ws[f"A{r}"].font = bold_font
-        ws[f"E{r}"].font = bold_font
+    # Baris 4: Saldo Awal (B4 = Tgl awal, C4:F4 = SALDO AWAL, G4 = Nominal Saldo Awal)
+    first_date = to_excel_date(rows[0]["tanggal"]) if rows else ""
+    ws.cell(row=4, column=2, value=first_date)
+    ws["B4"].font = Font(name="Calibri", size=11)
+    ws["B4"].alignment = Alignment(horizontal="center", vertical="center")
+    ws["B4"].number_format = date_fmt
 
-    # Header Tabel (Baris 7)
-    headers = [
-        "No", "Tanggal", "Keterangan / Uraian Transaksi",
-        "Lawan Transaksi", "Kategori Akun",
-        "Mutasi Masuk (Rp)", "Mutasi Keluar (Rp)", "Saldo Berjalan (Rp)"
-    ]
-    for col_idx, h_text in enumerate(headers, start=1):
-        cell = ws.cell(row=7, column=col_idx, value=h_text)
-        cell.fill = navy_fill
-        cell.font = white_bold
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        cell.border = border_all
+    ws.merge_cells("C4:F4")
+    ws["C4"] = "SALDO AWAL"
+    ws["C4"].font = Font(name="Calibri", size=11, bold=True)
+    ws["C4"].alignment = Alignment(horizontal="center", vertical="center")
 
-    # Baris 8: Saldo Awal
-    ws.cell(row=8, column=3, value="SALDO AWAL PERIODE").font = bold_font
-    c_sal_awal = ws.cell(row=8, column=8, value="=F2")
-    c_sal_awal.font = bold_font
-    c_sal_awal.number_format = num_fmt
-    for col_idx in range(1, 9):
-        ws.cell(row=8, column=col_idx).fill = sub_fill
-        ws.cell(row=8, column=col_idx).border = border_all
+    ws["G4"] = float(meta.get("saldo_awal", 0.0))
+    ws["G4"].font = Font(name="Calibri", size=11, bold=True)
+    ws["G4"].number_format = num_fmt
+    ws["G4"].alignment = Alignment(horizontal="right", vertical="center")
 
-    # Baris Transaksi
+    for col_idx in range(2, 9):
+        ws.cell(row=4, column=col_idx).border = Border(
+            top=thin,
+            bottom=thin,
+            left=med if col_idx == 2 else thin,
+            right=med if col_idx == 8 else thin,
+        )
+
+    # Baris 5 dst: Data Transaksi
+    reg_font = Font(name="Calibri", size=11)
     for i, tx in enumerate(rows):
-        r_idx = 9 + i
-        ws.cell(row=r_idx, column=1, value=i + 1).alignment = Alignment(horizontal="center")
-        ws.cell(row=r_idx, column=2, value=tx.get("tanggal", "-")).alignment = Alignment(horizontal="center")
-        c_desc = ws.cell(row=r_idx, column=3, value=tx.get("keterangan", "-"))
-        c_desc.alignment = Alignment(wrap_text=True, vertical="top")
-        ws.cell(row=r_idx, column=4, value=tx.get("lawan_transaksi", "-"))
-        ws.cell(row=r_idx, column=5, value=tx.get("kategori", "Lain-lain"))
+        r_idx = 5 + i
+        tgl_val = to_excel_date(tx.get("tanggal", ""))
+        remark_val = tx.get("remark") or tx.get("keterangan", "-")
+        acc_val = tx.get("acc_no") or None
+        masuk_val = float(tx.get("masuk", 0.0))
+        keluar_val = float(tx.get("keluar", 0.0))
+        catatan_val = tx.get("catatan") or None
 
-        c_in = ws.cell(row=r_idx, column=6, value=float(tx.get("masuk", 0.0)))
-        c_out = ws.cell(row=r_idx, column=7, value=float(tx.get("keluar", 0.0)))
-        c_bal = ws.cell(row=r_idx, column=8, value=f"=H{r_idx - 1}+F{r_idx}-G{r_idx}")
+        c_tgl = ws.cell(row=r_idx, column=2, value=tgl_val)
+        c_tgl.alignment = Alignment(horizontal="center", vertical="center")
+        c_tgl.number_format = date_fmt
 
-        for c in (c_in, c_out, c_bal):
-            c.number_format = num_fmt
+        c_rem = ws.cell(row=r_idx, column=3, value=remark_val)
+        c_rem.alignment = Alignment(horizontal="left", vertical="center")
 
-        for col_idx in range(1, 9):
+        c_acc = ws.cell(row=r_idx, column=4, value=acc_val)
+        c_acc.alignment = Alignment(horizontal="center", vertical="center")
+
+        # DEBIT = Uang Masuk (CR), dikosongkan jika 0 agar bersih sesuai template
+        c_deb = ws.cell(row=r_idx, column=5, value=masuk_val if masuk_val > 0 else None)
+        c_deb.number_format = num_fmt
+        c_deb.alignment = Alignment(horizontal="right", vertical="center")
+
+        # KREDIT = Uang Keluar (DB), dikosongkan jika 0 agar bersih sesuai template
+        c_kre = ws.cell(row=r_idx, column=6, value=keluar_val if keluar_val > 0 else None)
+        c_kre.number_format = num_fmt
+        c_kre.alignment = Alignment(horizontal="right", vertical="center")
+
+        # SALDO = Rumus dinamis berjalan
+        c_sal = ws.cell(row=r_idx, column=7, value=f"=G{r_idx - 1}+E{r_idx}-F{r_idx}")
+        c_sal.number_format = num_fmt
+        c_sal.alignment = Alignment(horizontal="right", vertical="center")
+
+        c_ket = ws.cell(row=r_idx, column=8, value=catatan_val)
+        c_ket.alignment = Alignment(horizontal="left", vertical="center")
+
+        for col_idx in range(2, 9):
             cell = ws.cell(row=r_idx, column=col_idx)
             cell.font = reg_font
-            cell.border = border_all
-            if i % 2 == 1:
-                cell.fill = zebra_fill
+            cell.border = Border(
+                top=thin,
+                bottom=thin,
+                left=med if col_idx == 2 else thin,
+                right=med if col_idx == 8 else thin,
+            )
 
-    # Baris Total
-    total_row = 9 + len(rows)
-    ws.cell(row=total_row, column=3, value="TOTAL MUTASI PERIODE INI").font = bold_font
-    ws.cell(row=total_row, column=6, value=f"=SUM(F9:F{total_row - 1})")
-    ws.cell(row=total_row, column=7, value=f"=SUM(G9:G{total_row - 1})")
-    ws.cell(row=total_row, column=8, value=f"=H{total_row - 1}")
-    for col_idx in range(1, 9):
-        cell = ws.cell(row=total_row, column=col_idx)
-        cell.fill = total_fill
-        cell.font = bold_font
-        cell.border = border_all
-        if col_idx in (6, 7, 8):
-            cell.number_format = num_fmt
+    # Lebar kolom mengikuti template BUKU BANK 2026.xlsx
+    col_widths = {
+        "A": 4,
+        "B": 11,
+        "C": 52,
+        "D": 12,
+        "E": 17,
+        "F": 17,
+        "G": 18,
+        "H": 38,
+    }
+    for col_letter, width in col_widths.items():
+        ws.column_dimensions[col_letter].width = width
 
-    # Sheet 2: Rekap per Kategori Akun (untuk Ekualisasi SPT)
+    ws.freeze_panes = "B5"
+
+    # Sheet 2: Rekap Kategori Akun (opsional untuk audit/ekualisasi)
     ws_cat = wb.create_sheet(title="Rekap Kategori")
+    navy_fill = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+    white_bold = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    title_font = Font(name="Calibri", size=14, bold=True, color="1E3A8A")
+    border_cat = Border(left=thin, right=thin, top=thin, bottom=thin)
+
     ws_cat["A1"] = "REKAPITULASI MUTASI PER KATEGORI AKUN"
     ws_cat["A1"].font = title_font
-    cat_headers = ["Kategori Akun", "Jumlah Transaksi", "Total Mutasi Masuk (Rp)", "Total Mutasi Keluar (Rp)"]
+    cat_headers = ["Kategori Akun", "Jumlah Transaksi", "Total Debit / Masuk (Rp)", "Total Kredit / Keluar (Rp)"]
     for col_idx, h_text in enumerate(cat_headers, start=1):
         c = ws_cat.cell(row=3, column=col_idx, value=h_text)
         c.fill = navy_fill
         c.font = white_bold
-        c.border = border_all
+        c.border = border_cat
 
-    categories = sorted(set(tx.get("kategori", "Lain-lain") for tx in rows))
-    for idx, cat in enumerate(categories, start=4):
-        ws_cat.cell(row=idx, column=1, value=cat).border = border_all
-        c_cnt = ws_cat.cell(row=idx, column=2, value=f'=COUNTIF(\'Buku Bank\'!$E$9:$E${total_row - 1}, A{idx})')
-        c_in = ws_cat.cell(row=idx, column=3, value=f'=SUMIF(\'Buku Bank\'!$E$9:$E${total_row - 1}, A{idx}, \'Buku Bank\'!$F$9:$F${total_row - 1})')
-        c_out = ws_cat.cell(row=idx, column=4, value=f'=SUMIF(\'Buku Bank\'!$E$9:$E${total_row - 1}, A{idx}, \'Buku Bank\'!$G$9:$G${total_row - 1})')
+    cat_summary = {}
+    for tx in rows:
+        cat = tx.get("kategori", "Lain-lain")
+        if cat not in cat_summary:
+            cat_summary[cat] = [0, 0.0, 0.0]
+        cat_summary[cat][0] += 1
+        cat_summary[cat][1] += float(tx.get("masuk", 0.0))
+        cat_summary[cat][2] += float(tx.get("keluar", 0.0))
+
+    for idx, (cat, vals) in enumerate(sorted(cat_summary.items()), start=4):
+        ws_cat.cell(row=idx, column=1, value=cat).border = border_cat
+        c_cnt = ws_cat.cell(row=idx, column=2, value=vals[0])
+        c_in = ws_cat.cell(row=idx, column=3, value=round(vals[1], 2))
+        c_out = ws_cat.cell(row=idx, column=4, value=round(vals[2], 2))
         for c in (c_cnt, c_in, c_out):
-            c.border = border_all
+            c.border = border_cat
         c_in.number_format = num_fmt
         c_out.number_format = num_fmt
-
-    for col_idx, width in {1: 6, 2: 13, 3: 44, 4: 26, 5: 30, 6: 20, 7: 20, 8: 22}.items():
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-    ws.freeze_panes = "A9"
 
     for col_idx, width in {1: 34, 2: 18, 3: 24, 4: 24}.items():
         ws_cat.column_dimensions[get_column_letter(col_idx)].width = width
